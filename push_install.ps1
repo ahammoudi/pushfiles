@@ -157,6 +157,9 @@ $copyButton.Add_Click({
 
 # Execute Commands button click event
 $executeButton.Add_Click({
+    $filePath = $filePathBox.Text
+    $fileName = Split-Path -Path $filePath -Leaf
+
     $selectedItem = $dropdown.SelectedItem
     if ($selectedItem -eq "Select Server List" -or -not $selectedItem) {
         $outputBox.Text += "Please select a server list." + [Environment]::NewLine
@@ -178,18 +181,22 @@ $executeButton.Add_Click({
                 try {
                     # Start the command execution as a job
                     $job = Start-Job -ScriptBlock {
-                        param ($server, $cred)
+                        param ($server, $cred, $fileName)
                         $session = New-PSSession -ComputerName $server -Credential $cred
                         Invoke-Command -Session $session -ScriptBlock {
+                            param ($fileName)
                             # Add your additional commands here
                             Write-Host "Executing additional commands on $env:COMPUTERNAME"
-                            # Example: Create a directory
-                            New-Item -Path "C:\temp\NewFolder" -ItemType Directory
+                            # Example: Unzip the file
+                            $zipPath = "C:\temp\$fileName"
+                            $extractPath = "C:\temp\extracted"
+                            Add-Type -AssemblyName System.IO.Compression.FileSystem
+                            [System.IO.Compression.ZipFile]::ExtractToDirectory($zipPath, $extractPath)
                             # Example: Write a log file
                             "Commands executed on $env:COMPUTERNAME" | Out-File "C:\temp\log.txt"
-                        }
+                        } -ArgumentList $fileName
                         Remove-PSSession -Session $session
-                    } -ArgumentList $server, $cred
+                    } -ArgumentList $server, $cred, $fileName
 
                     # Wait for the job to complete
                     $job | Wait-Job
