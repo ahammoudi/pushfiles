@@ -99,26 +99,16 @@ $copyButton.Add_Click({
                 try {
                     $destinationPath = "\\${server}\C$\temp"
 
-                    # Copy with Progress Reporting (using Copy-Item)
-                    $job = Copy-Item -Path $filePath -Destination $destinationPath -Credential $cred -Force -PassThru -AsJob
-
-                    $progressSplat = @{
-                        EventName = "Progress"
-                        SourceIdentifier = "FileCopyProgress"
-                        Action = {
-                            param([object] $progressEvent)
-                            $progressRecord = $progressEvent.ProgressRecord
-                            $percentComplete = $progressRecord.PercentComplete
-                            # Update the outputBox with progress
-                            $outputBox.Text += "Copying to ${server}: $percentComplete% complete" + [Environment]::NewLine
-                        }
-                    }
-
-                    Register-ObjectEvent -InputObject $job -EventName "ProgressChanged" @progressSplat
+                    # Start the copy operation as a job
+                    $job = Start-Job -ScriptBlock {
+                        param ($filePath, $destinationPath, $cred)
+                        Copy-Item -Path $filePath -Destination $destinationPath -Credential $cred -Force
+                    } -ArgumentList $filePath, $destinationPath, $cred
 
                     # Wait for the job to complete
                     $job | Wait-Job
 
+                    # Check the job state
                     if ($job.State -eq 'Completed') {
                         $outputBox.Text += "Copy to ${server} completed successfully." + [Environment]::NewLine
                     } else {
