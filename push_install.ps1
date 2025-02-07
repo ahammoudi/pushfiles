@@ -42,6 +42,7 @@ $form.Controls.Add($filePathBox)
 # Browse button click event
 $browseButton.Add_Click({
     $fileDialog = New-Object System.Windows.Forms.OpenFileDialog
+    $fileDialog.Filter = "ZIP files (*.zip)|*.zip"
     if ($fileDialog.ShowDialog() -eq "OK") {
         $filePathBox.Text = $fileDialog.FileName
     }
@@ -97,6 +98,8 @@ $copyButton.Add_Click({
         return
     }
 
+    $fileName = Split-Path -Path $filePath -Leaf
+
     $selectedItem = $dropdown.SelectedItem
     if ($selectedItem -eq "Select Server List" -or -not $selectedItem) {
         $outputBox.Text += "Please select a server list." + [Environment]::NewLine
@@ -113,7 +116,7 @@ $copyButton.Add_Click({
         foreach ($server in $servers) {
             if (-not [string]::IsNullOrWhiteSpace($server)) {
                 if ($isDebug) {
-                    $outputBox.Text += "Copying to ${server}..." + [Environment]::NewLine
+                    $outputBox.Text += "Copying ${fileName} to ${server}..." + [Environment]::NewLine
                 }
                 try {
                     $destinationPath = "\\${server}\C$\temp"
@@ -127,17 +130,23 @@ $copyButton.Add_Click({
                     # Wait for the job to complete
                     $job | Wait-Job
 
+                    # Get the job output
+                    $jobOutput = Receive-Job -Job $job
+
                     # Check the job state
                     if ($job.State -eq 'Completed') {
-                        $outputBox.Text += "Copy to ${server} completed successfully." + [Environment]::NewLine
+                        $outputBox.Text += "Copy of ${fileName} to ${server} completed successfully." + [Environment]::NewLine
                     } else {
-                        $outputBox.Text += "Copy to ${server} failed." + [Environment]::NewLine
+                        $outputBox.Text += "Copy of ${fileName} to ${server} failed." + [Environment]::NewLine
                     }
+
+                    # Display the job output
+                    $outputBox.Text += $jobOutput + [Environment]::NewLine
 
                     # Clean up the job
                     Remove-Job -Job $job
                 } catch {
-                    $outputBox.Text += "Error copying to ${server}: $($_.Exception.Message)" + [Environment]::NewLine
+                    $outputBox.Text += "Error copying ${fileName} to ${server}: $($_.Exception.Message)" + [Environment]::NewLine
                 }
             }
         }
@@ -185,12 +194,18 @@ $executeButton.Add_Click({
                     # Wait for the job to complete
                     $job | Wait-Job
 
+                    # Get the job output
+                    $jobOutput = Receive-Job -Job $job
+
                     # Check the job state
                     if ($job.State -eq 'Completed') {
                         $outputBox.Text += "Commands executed on ${server} successfully." + [Environment]::NewLine
                     } else {
                         $outputBox.Text += "Commands execution on ${server} failed." + [Environment]::NewLine
                     }
+
+                    # Display the job output
+                    $outputBox.Text += $jobOutput + [Environment]::NewLine
 
                     # Clean up the job
                     Remove-Job -Job $job
