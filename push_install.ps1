@@ -70,6 +70,14 @@ $copyButton.Width = 160
 $copyButton.Height = 40
 $form.Controls.Add($copyButton)
 
+# Execute Commands button
+$executeButton = New-Object System.Windows.Forms.Button
+$executeButton.Text = "Execute Commands"
+$executeButton.Location = New-Object System.Drawing.Point(180, 520)
+$executeButton.Width = 160
+$executeButton.Height = 40
+$form.Controls.Add($executeButton)
+
 # Copy button click event
 $copyButton.Add_Click({
     $filePath = $filePathBox.Text
@@ -119,6 +127,64 @@ $copyButton.Add_Click({
                     Remove-Job -Job $job
                 } catch {
                     $outputBox.Text += "Error copying to ${server}: $($_.Exception.Message)" + [Environment]::NewLine
+                }
+            }
+        }
+    } catch {
+        $outputBox.Text += "Error reading server list file '$serverListFile': $($_.Exception.Message)" + [Environment]::NewLine
+    }
+})
+
+# Execute Commands button click event
+$executeButton.Add_Click({
+    $selectedItem = $dropdown.SelectedItem
+    if ($selectedItem -eq "Select Server List" -or -not $selectedItem) {
+        $outputBox.Text += "Please select a server list." + [Environment]::NewLine
+        return
+    }
+
+    $cred = Get-Credential -Message "Enter credentials for remote servers"
+    $isDebug = $debugCheckbox.Checked
+
+    try {
+        $serverListFile = "$selectedItem.txt"
+        $servers = Get-Content $serverListFile
+
+        foreach ($server in $servers) {
+            if (-not [string]::IsNullOrWhiteSpace($server)) {
+                if ($isDebug) {
+                    $outputBox.Text += "Executing commands on ${server}..." + [Environment]::NewLine
+                }
+                try {
+                    # Start the command execution as a job
+                    $job = Start-Job -ScriptBlock {
+                        param ($server, $cred)
+                        $session = New-PSSession -ComputerName $server -Credential $cred
+                        Invoke-Command -Session $session -ScriptBlock {
+                            # Add your additional commands here
+                            Write-Host "Executing additional commands on $env:COMPUTERNAME"
+                            # Example: Create a directory
+                            New-Item -Path "C:\temp\NewFolder" -ItemType Directory
+                            # Example: Write a log file
+                            "Commands executed on $env:COMPUTERNAME" | Out-File "C:\temp\log.txt"
+                        }
+                        Remove-PSSession -Session $session
+                    } -ArgumentList $server, $cred
+
+                    # Wait for the job to complete
+                    $job | Wait-Job
+
+                    # Check the job state
+                    if ($job.State -eq 'Completed') {
+                        $outputBox.Text += "Commands executed on ${server} successfully." + [Environment]::NewLine
+                    } else {
+                        $outputBox.Text += "Commands execution on ${server} failed." + [Environment]::NewLine
+                    }
+
+                    # Clean up the job
+                    Remove-Job -Job $job
+                } catch {
+                    $outputBox.Text += "Error executing commands on ${server}: $($_.Exception.Message)" + [Environment]::NewLine
                 }
             }
         }
