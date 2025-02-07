@@ -78,6 +78,17 @@ $executeButton.Width = 160
 $executeButton.Height = 40
 $form.Controls.Add($executeButton)
 
+# Variable to store credentials
+$global:cred = $null
+
+# Function to get credentials
+function Get-GlobalCredential {
+    if (-not $global:cred) {
+        $global:cred = Get-Credential -Message "Enter credentials for remote servers"
+    }
+    return $global:cred
+}
+
 # Copy button click event
 $copyButton.Add_Click({
     $filePath = $filePathBox.Text
@@ -92,7 +103,7 @@ $copyButton.Add_Click({
         return
     }
 
-    $cred = Get-Credential -Message "Enter credentials for remote servers"
+    $cred = Get-GlobalCredential
     $isDebug = $debugCheckbox.Checked
 
     try {
@@ -143,7 +154,7 @@ $executeButton.Add_Click({
         return
     }
 
-    $cred = Get-Credential -Message "Enter credentials for remote servers"
+    $cred = Get-GlobalCredential
     $isDebug = $debugCheckbox.Checked
 
     try {
