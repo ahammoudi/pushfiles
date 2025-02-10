@@ -126,9 +126,15 @@ foreach ($file in $textFiles) {
 }
 $form.Controls.Add($dropdown)
 
+$syncButton = New-Object System.Windows.Forms.Button
+$syncButton.Text = "Sync Releases"
+$syncButton.Width = 160
+$syncButton.Height = 40
+$form.Controls.Add($syncButton)
+
 # File browse button for MSI ZIP file
 $browseButton = New-Object System.Windows.Forms.Button
-$browseButton.Text = "Browse ZIP File"
+$browseButton.Text = "Select folder"
 $browseButton.Location = New-Object System.Drawing.Point(10, 60)
 $browseButton.Width = 160
 $browseButton.Height = 20
@@ -142,13 +148,14 @@ $form.Controls.Add($zipFilePathBox)
 
 # Browse button click event
 $browseButton.Add_Click({
-    $fileDialog = New-Object System.Windows.Forms.OpenFileDialog
-    $fileDialog.Filter = "ZIP files (*.zip)|*.zip"
-    if ($fileDialog.ShowDialog() -eq "OK") {
-        $zipFilePathBox.Text = $fileDialog.FileName
+    $folderDialog = New-Object System.Windows.Forms.FolderBrowserDialog
+    $folderDialog.Description = "Select folder"
+    $folderDialog.ShowNewFolderButton = $true
+    
+    if ($folderDialog.ShowDialog() -eq "OK") {
+        $zipFilePathBox.Text = $folderDialog.SelectedPath
     }
 })
-
 # Output TextBox
 $outputBox = New-Object System.Windows.Forms.RichTextBox
 $outputBox.Location = New-Object System.Drawing.Point(10, 110)
@@ -158,13 +165,6 @@ $outputBox.Multiline = $true
 $outputBox.ScrollBars = "Vertical"
 $outputBox.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right
 $form.Controls.Add($outputBox)
-
-# Verify ZIP button
-$verifyZipButton = New-Object System.Windows.Forms.Button
-$verifyZipButton.Text = "Verify ZIP File"
-$verifyZipButton.Width = 160
-$verifyZipButton.Height = 40
-$form.Controls.Add($verifyZipButton)
 
 # Push ZIP button
 $pushZipButton = New-Object System.Windows.Forms.Button
@@ -183,15 +183,15 @@ $form.Controls.Add($installMsiButton)
 # Function to center buttons
 function Set-ButtonsAlignment {
     $formWidth = [int]$form.ClientSize.Width
-    $buttonWidth = [int]$verifyZipButton.Width
+    $buttonWidth = [int]$pushZipButton.Width
     $spacing = [int]20
     $totalWidth = [int](($buttonWidth * 3) + ($spacing * 2))
     $startX = [int](($formWidth - $totalWidth) / 2)
     $y = [int]($outputBox.Location.Y + $outputBox.Height + 10)
 
-    $verifyZipButton.Location = New-Object System.Drawing.Point($startX, $y)
-    $pushZipButton.Location = New-Object System.Drawing.Point(($startX + $buttonWidth + $spacing), $y)
-    $installMsiButton.Location = New-Object System.Drawing.Point(($startX + ($buttonWidth + $spacing) * 2), $y)
+    $pushZipButton.Location = New-Object System.Drawing.Point($startX, $y)
+    $installMsiButton.Location = New-Object System.Drawing.Point(($startX + $buttonWidth + $spacing), $y)
+    $syncButton.Location = New-Object System.Drawing.Point(($startX + ($buttonWidth + $spacing) * 2), $y)
 }
 
 # Add resize event handler
@@ -243,31 +243,70 @@ function Write-LogMessage {
     $outputBox.AppendText($LogEntry + [Environment]::NewLine)
     $outputBox.ScrollToCaret()
 }
-
-# Verify ZIP button click event
-$verifyZipButton.Add_Click({
-    $zipFilePath = $zipFilePathBox.Text
-    if (-not $zipFilePath) {
-        Write-LogMessage "Please select a ZIP file to verify." -IsError
+$syncButton.Add_Click({
+    $selectedItem = $dropdown.SelectedItem
+    if ($selectedItem -eq "Select Server List" -or -not $selectedItem) {
+        Write-LogMessage "Please select a server list." -IsError
         return
     }
 
-    Write-LogMessage "Verifying ZIP file..." -ProgressValue 0
+    $cred = Get-GlobalCredential
+    
+    # Get remote server path from config
+    $remotePath = $config.RemoteServer
+    if (-not $remotePath) {
+        Write-LogMessage "Remote server path not configured in config.json" -IsError
+        return
+    }
+
+    # Create local releases directory if it doesn't exist
+    $localPath = Join-Path $PSScriptRoot "releases"
+    if (-not (Test-Path $localPath)) {
+        New-Item -ItemType Directory -Path $localPath | Out-Null
+    }
 
     try {
-        Add-Type -AssemblyName System.IO.Compression.FileSystem
-        $zipArchive = [System.IO.Compression.ZipFile]::OpenRead($zipFilePath)
-        Write-LogMessage "Reading ZIP contents..." -ProgressValue 50
-        $entry = $zipArchive.Entries | Where-Object { $_.FullName -eq $TargetMSIPathInZip }
+        Write-LogMessage "Starting sync from $remotePath..." -ProgressValue 0
 
-        if ($entry) {
-            Write-LogMessage "Valid ZIP File." -ProgressValue 100
+        $job = Start-Job -ScriptBlock {
+            param ($remotePath, $localPath, [PSCredential]$cred)
+            
+            # Get all folders in remote path
+            $remoteFolders = Get-ChildItem -Path $remotePath -Directory -Credential $cred
+            $totalItems = $remoteFolders.Count
+            $current = 0
+
+            foreach ($folder in $remoteFolders) {
+                $current++
+                $targetPath = Join-Path $localPath $folder.Name
+                
+                # Create folder if it doesn't exist
+                if (-not (Test-Path $targetPath)) {
+                    New-Item -ItemType Directory -Path $targetPath | Out-Null
+                }
+
+                # Copy all contents recursively
+                Copy-Item -Path (Join-Path $folder.FullName "*") -Destination $targetPath -Recurse -Force -Credential $cred
+                
+                Write-Output "Synced folder: $($folder.Name)"
+            }
+        } -ArgumentList $remotePath, $localPath, $cred
+
+        # Wait for sync to complete
+        $job | Wait-Job
+        $jobOutput = Receive-Job -Job $job
+
+        if ($job.State -eq 'Completed') {
+            Write-LogMessage "Sync completed successfully." -ProgressValue 100
+            $jobOutput | ForEach-Object { Write-LogMessage $_ }
         } else {
-            Write-LogMessage "Invalid ZIP File." -IsError
-            $progressBar.Visible = $false
+            Write-LogMessage "Sync operation failed." -IsError
         }
+
+        Remove-Job -Job $job
+
     } catch {
-        Write-LogMessage "Error verifying ZIP file: $_" -IsError
+        Write-LogMessage "Error during sync: $($_.Exception.Message)" -IsError
         $progressBar.Visible = $false
     }
 })
