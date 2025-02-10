@@ -1,0 +1,7 @@
+{
+    "LogFile": "C:\\temp\\deployment_log.txt",
+    "TargetMSIFileName": "abc.msi",
+    "TargetMSIPathInZip": "install/abc.msi",
+    "AppPoolName": "YourAppPoolName",
+    "ServiceName": "YourServiceName"
+}
