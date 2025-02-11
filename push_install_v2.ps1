@@ -463,17 +463,70 @@ $pushZipButton.Add_Click({
         # Create all copy jobs simultaneously
         $jobs = foreach ($server in $servers) {
             Start-Job -ScriptBlock {
-                param ($zipFilePath, $server, $cred)
+                param ($zipFilePath, $server, [PSCredential]$cred)
                 try {
+                    Write-Output "###STATUS###:Starting copy to $server"
                     $destinationPath = "\\${server}\C$\temp"
+                    
+                    # Test path accessibility
+                    if (-not (Test-Path -Path $destinationPath -Credential $cred)) {
+                        Write-Output "###STATUS###:Creating temp directory on $server"
+                        New-Item -Path $destinationPath -ItemType Directory -Credential $cred -Force
+                    }
+                    
+                    # Verify source file exists
+                    if (-not (Test-Path -Path $zipFilePath)) {
+                        throw "Source file not found: $zipFilePath"
+                    }
+                    
+                    Write-Output "###STATUS###:Copying file to $server"
                     Copy-Item -Path $zipFilePath -Destination $destinationPath -Credential $cred -Force
-                    "###SUCCESS###:$server"
+                    
+                    # Verify copy succeeded
+                    $destFile = Join-Path $destinationPath (Split-Path $zipFilePath -Leaf)
+                    if (Test-Path -Path $destFile -Credential $cred) {
+                        Write-Output "###SUCCESS###:$server"
+                    } else {
+                        throw "File copy succeeded but destination file not found"
+                    }
                 } catch {
-                    "###ERROR###:$server:$($_.Exception.Message)"
+                    Write-Output "###ERROR###:$server:$($_.Exception.Message)"
                 }
             } -ArgumentList $zipFilePath, $server, $cred
         }
-
+        
+        # Update the monitoring loop to include more detailed progress
+        $totalJobs = $jobs.Count
+        $lastProgress = 25
+        while ($jobs | Where-Object { $_.State -eq 'Running' }) {
+            $completed = ($jobs | Where-Object { $_.State -eq 'Completed' }).Count
+            $progress = 25 + [math]::Floor(($completed / $totalJobs) * 75)
+            
+            if ($progress -ne $lastProgress) {
+                Write-LogMessage "Copying to servers... ($completed/$totalJobs complete)" -ProgressValue $progress
+                $lastProgress = $progress
+            }
+        
+            # Process completed jobs
+            foreach ($job in ($jobs | Where-Object { $_.State -eq 'Completed' })) {
+                $output = Receive-Job -Job $job
+                foreach ($line in $output) {
+                    if ($line.StartsWith('###SUCCESS###:')) {
+                        $server = $line.Split(':')[1]
+                        Write-LogMessage "Push completed: $server"
+                    } elseif ($line.StartsWith('###ERROR###:')) {
+                        $parts = $line.Split(':')
+                        Write-LogMessage "Push failed: $($parts[1]) - $($parts[2])" -IsError
+                    } elseif ($line.StartsWith('###STATUS###:')) {
+                        $status = $line.Split(':')[1]
+                        Write-LogMessage $status
+                    }
+                }
+                Remove-Job -Job $job
+            }
+            [System.Windows.Forms.Application]::DoEvents()
+            Start-Sleep -Milliseconds 500
+        }
         # Monitor all jobs simultaneously
         $totalJobs = $jobs.Count
         while ($jobs | Where-Object { $_.State -eq 'Running' }) {
