@@ -275,21 +275,49 @@ $syncButton.Add_Click({
             $remoteFolders = Get-ChildItem -Path $remotePath -Directory -Credential $cred
             $totalItems = $remoteFolders.Count
             $current = 0
-
+        
             foreach ($folder in $remoteFolders) {
                 $current++
                 $percentComplete = [math]::Floor(($current / $totalItems) * 100)
                 
                 Write-Output "###PROGRESS###:$percentComplete"
-                Write-Output "###STATUS###:Copying folder ($current/$totalItems): $($folder.Name)"
+                Write-Output "###STATUS###:Processing folder ($current/$totalItems): $($folder.Name)"
                 
                 $targetPath = Join-Path $localPath $folder.Name
                 
                 if (-not (Test-Path $targetPath)) {
                     New-Item -ItemType Directory -Path $targetPath | Out-Null
+                    Write-Output "###STATUS###:Created new folder: $($folder.Name)"
                 }
-
-                Copy-Item -Path (Join-Path $folder.FullName "*") -Destination $targetPath -Recurse -Force -Credential $cred
+        
+                # Get remote files
+                $remoteFiles = Get-ChildItem -Path (Join-Path $folder.FullName "*") -Recurse -Credential $cred
+        
+                foreach ($remoteFile in $remoteFiles) {
+                    $relativePath = $remoteFile.FullName.Substring($folder.FullName.Length)
+                    $localFilePath = Join-Path $targetPath $relativePath
+                    
+                    $shouldCopy = $false
+                    
+                    if (-not (Test-Path $localFilePath)) {
+                        $shouldCopy = $true
+                        Write-Output "###STATUS###:New file found: $relativePath"
+                    } else {
+                        $localFile = Get-Item $localFilePath
+                        if ($remoteFile.LastWriteTime -gt $localFile.LastWriteTime) {
+                            $shouldCopy = $true
+                            Write-Output "###STATUS###:Updated file found: $relativePath"
+                        }
+                    }
+        
+                    if ($shouldCopy) {
+                        $localFolder = Split-Path $localFilePath -Parent
+                        if (-not (Test-Path $localFolder)) {
+                            New-Item -ItemType Directory -Path $localFolder -Force | Out-Null
+                        }
+                        Copy-Item -Path $remoteFile.FullName -Destination $localFilePath -Force -Credential $cred
+                    }
+                }
                 Write-Output "###COMPLETE###:$($folder.Name)"
             }
         } -ArgumentList $remotePath, $localPath, $cred
@@ -314,7 +342,7 @@ $syncButton.Add_Click({
         Start-Sleep -Milliseconds 100
     }
 
-    $finalOutput = Receive-Job -Job $job
+    Receive-Job -Job $job | Out-Null
     
     if ($job.State -eq 'Completed') {
         Write-LogMessage "Sync completed successfully." -ProgressValue 100
