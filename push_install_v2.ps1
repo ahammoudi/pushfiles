@@ -278,32 +278,51 @@ $syncButton.Add_Click({
 
             foreach ($folder in $remoteFolders) {
                 $current++
+                $percentComplete = [math]::Floor(($current / $totalItems) * 100)
+                
+                Write-Output "###PROGRESS###:$percentComplete"
+                Write-Output "###STATUS###:Copying folder ($current/$totalItems): $($folder.Name)"
+                
                 $targetPath = Join-Path $localPath $folder.Name
                 
-                # Create folder if it doesn't exist
                 if (-not (Test-Path $targetPath)) {
                     New-Item -ItemType Directory -Path $targetPath | Out-Null
                 }
 
-                # Copy all contents recursively
                 Copy-Item -Path (Join-Path $folder.FullName "*") -Destination $targetPath -Recurse -Force -Credential $cred
-                
-                Write-Output "Synced folder: $($folder.Name)"
+                Write-Output "###COMPLETE###:$($folder.Name)"
             }
         } -ArgumentList $remotePath, $localPath, $cred
 
-        # Wait for sync to complete
-        $job | Wait-Job
+       # Wait for sync to complete
+       while ($job.State -eq 'Running') {
         $jobOutput = Receive-Job -Job $job
-
-        if ($job.State -eq 'Completed') {
-            Write-LogMessage "Sync completed successfully." -ProgressValue 100
-            $jobOutput | ForEach-Object { Write-LogMessage $_ }
-        } else {
-            Write-LogMessage "Sync operation failed." -IsError
+        foreach ($line in $jobOutput) {
+            if ($line.StartsWith('###PROGRESS###:')) {
+                $progress = [int]($line.Split(':')[1])
+                $progressBar.Value = $progress
+            }
+            elseif ($line.StartsWith('###STATUS###:')) {
+                $status = $line.Split(':')[1]
+                Write-LogMessage $status
+            }
+            elseif ($line.StartsWith('###COMPLETE###:')) {
+                $folder = $line.Split(':')[1]
+                Write-LogMessage "Completed copying folder: $folder"
+            }
         }
+        Start-Sleep -Milliseconds 100
+    }
 
-        Remove-Job -Job $job
+    $finalOutput = Receive-Job -Job $job
+    
+    if ($job.State -eq 'Completed') {
+        Write-LogMessage "Sync completed successfully." -ProgressValue 100
+    } else {
+        Write-LogMessage "Sync operation failed." -IsError
+    }
+
+    Remove-Job -Job $job
 
     } catch {
         Write-LogMessage "Error during sync: $($_.Exception.Message)" -IsError
