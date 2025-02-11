@@ -425,92 +425,91 @@ if (-not (Test-Path $tempPath)) {
 
 # Update Push ZIP button click event
 $pushZipButton.Add_Click({
-        $selectedFolder = $zipFilePathBox.Text
-        if (-not $selectedFolder) {
-            Write-LogMessage "Please select a folder to zip and push." -IsError
+    $selectedFolder = $zipFilePathBox.Text
+    if (-not $selectedFolder) {
+        Write-LogMessage "Please select a folder to zip and push." -IsError
+        return
+    }
+
+    $selectedItem = $dropdown.SelectedItem
+    if ($selectedItem -eq "Select Server List" -or -not $selectedItem) {
+        Write-LogMessage "Please select a server list." -IsError
+        return
+    }
+
+    try {
+        # Create ZIP file
+        $folderName = Split-Path $selectedFolder -Leaf
+        $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
+        $global:currentZipFileName = "${folderName}_${timestamp}.zip"
+        $zipFilePath = Join-Path $tempPath $global:currentZipFileName
+
+        Write-LogMessage "Creating ZIP file..." -ProgressValue 0
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        [System.IO.Compression.ZipFile]::CreateFromDirectory($selectedFolder, $zipFilePath)
+        Write-LogMessage "ZIP file created: $global:currentZipFileName" -ProgressValue 20
+
+        # Get server list and credentials
+        $serverListFile = ".\config\$selectedItem.txt"
+        $servers = Get-Content $serverListFile | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+        $cred = Get-GlobalCredential -TestServer $servers[0]
+        if (-not $cred) {
+            Remove-Item -Path $zipFilePath -Force
             return
         }
 
-        $selectedItem = $dropdown.SelectedItem
-        if ($selectedItem -eq "Select Server List" -or -not $selectedItem) {
-            Write-LogMessage "Please select a server list." -IsError
-            return
+        Write-LogMessage "Starting parallel file push..." -ProgressValue 25
+
+        # Create all copy jobs simultaneously
+        $jobs = foreach ($server in $servers) {
+            Start-Job -ScriptBlock {
+                param ($zipFilePath, $server, $cred)
+                try {
+                    $destinationPath = "\\${server}\C$\temp"
+                    Copy-Item -Path $zipFilePath -Destination $destinationPath -Credential $cred -Force
+                    "###SUCCESS###:$server"
+                } catch {
+                    "###ERROR###:$server:$($_.Exception.Message)"
+                }
+            } -ArgumentList $zipFilePath, $server, $cred
         }
 
-        try {
-            # Create ZIP file
-            $folderName = Split-Path $selectedFolder -Leaf
-            $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-            $global:currentZipFileName = "${folderName}_${timestamp}.zip"
-            $zipFilePath = Join-Path $tempPath $global:currentZipFileName
+        # Monitor all jobs simultaneously
+        $totalJobs = $jobs.Count
+        while ($jobs | Where-Object { $_.State -eq 'Running' }) {
+            $completed = ($jobs | Where-Object { $_.State -eq 'Completed' }).Count
+            $progress = 25 + [math]::Floor(($completed / $totalJobs) * 75)
+            
+            Write-LogMessage "Copying to servers... ($completed/$totalJobs complete)" -ProgressValue $progress
 
-            Write-LogMessage "Creating ZIP file from selected folder..." -ProgressValue 0
-        
-            Add-Type -AssemblyName System.IO.Compression.FileSystem
-            [System.IO.Compression.ZipFile]::CreateFromDirectory($selectedFolder, $zipFilePath)
-        
-            Write-LogMessage "ZIP file created successfully: $zipFileName" -ProgressValue 25
-
-            # Get credentials and server list
-            $serverListFile = ".\config\$selectedItem.txt"
-            $servers = Get-Content $serverListFile
-            $cred = Get-GlobalCredential -TestServer $servers[0]
-            if (-not $cred) {
-                Remove-Item -Path $zipFilePath -Force
-                return
-            }
-
-            $totalServers = ($servers | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }).Count
-            $currentServer = 0
-
-            # Push ZIP to servers
-            foreach ($server in $servers) {
-                if (-not [string]::IsNullOrWhiteSpace($server)) {
-                    $currentServer++
-                    $progress = 25 + [math]::Floor(($currentServer / $totalServers) * 75)  # Scale progress from 25-100
-                    $progressBar.Value = $progress
-                    Update-Progress -Current $currentServer -Total $totalServers -Operation "Pushing ZIP to servers"
-
-                    try {
-                        $destinationPath = "\\${server}\C$\temp"
-                        $job = Start-Job -ScriptBlock {
-                            param ($zipFilePath, $destinationPath, [PSCredential]$cred)
-                            Copy-Item -Path $zipFilePath -Destination $destinationPath -Credential $cred -Force
-                        } -ArgumentList $zipFilePath, $destinationPath, $cred
-
-                        $job | Wait-Job
-                        $jobOutput = Receive-Job -Job $job
-
-                        if ($job.State -eq 'Completed') {
-                            Write-LogMessage "Copy of ${zipFileName} to ${server} completed successfully."
-                        }
-                        else {
-                            Write-LogMessage "Copy of ${zipFileName} to ${server} failed." -IsError
-                        }
-
-                        $outputBox.AppendText($jobOutput + [Environment]::NewLine)
-                        Remove-Job -Job $job
-                    }
-                    catch {
-                        Write-LogMessage "Error copying ${zipFileName} to ${server}: $($_.Exception.Message)" -IsError
+            # Process completed jobs
+            foreach ($job in ($jobs | Where-Object { $_.State -eq 'Completed' })) {
+                $output = Receive-Job -Job $job
+                foreach ($line in $output) {
+                    if ($line.StartsWith('###SUCCESS###:')) {
+                        $server = $line.Split(':')[1]
+                        Write-LogMessage "Push completed: $server"
+                    } elseif ($line.StartsWith('###ERROR###:')) {
+                        $parts = $line.Split(':')
+                        Write-LogMessage "Push failed: $($parts[1]) - $($parts[2])" -IsError
                     }
                 }
+                Remove-Job -Job $job
             }
+            [System.Windows.Forms.Application]::DoEvents()
+            Start-Sleep -Milliseconds 100
+        }
 
-            Write-LogMessage "Push operation completed." -ProgressValue 100
-        
-            # Cleanup temp ZIP file
+        Write-LogMessage "Push operation completed." -ProgressValue 100
+        Remove-Item -Path $zipFilePath -Force
+
+    } catch {
+        Write-LogMessage "Error: $($_.Exception.Message)" -IsError
+        if (Test-Path $zipFilePath) {
             Remove-Item -Path $zipFilePath -Force
-
         }
-        catch {
-            Write-LogMessage "Error during operation: $($_.Exception.Message)" -IsError
-            $progressBar.Visible = $false
-            if (Test-Path $zipFilePath) {
-                Remove-Item -Path $zipFilePath -Force
-            }
-        }
-    })
+    }
+})
 
 # Install MSI button click event
 $installMsiButton.Add_Click({
