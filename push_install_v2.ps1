@@ -211,12 +211,45 @@ $global:cred = $null
 
 # Function to get credentials
 function Get-GlobalCredential {
+    param(
+        [string]$TestServer
+    )
+    
     if (-not $global:cred) {
         $global:cred = Get-Credential -Message "Enter credentials for remote servers"
+        
+        # Test credentials against first available server
+        if ($global:cred -and $TestServer) {
+            if (-not (Test-Credential -Credential $global:cred -TestServer $TestServer)) {
+                return $null
+            }
+        }
     }
     return $global:cred
 }
 
+# Test credentials is valid.
+function Test-Credential {
+    param(
+        [PSCredential]$Credential,
+        [string]$TestServer
+    )
+    
+    try {
+        Write-LogMessage "Testing credentials..."
+        $session = New-PSSession -ComputerName $TestServer -Credential $Credential -ErrorAction Stop
+        if ($session) {
+            Remove-PSSession -Session $session
+            Write-LogMessage "Credential validation successful"
+            return $true
+        }
+    } catch {
+        Write-LogMessage "Credential validation failed: $($_.Exception.Message)" -IsError
+        $global:cred = $null  # Clear invalid credentials
+        return $false
+    }
+    return $false
+}
 # Function to write to the log file and output box
 function Write-LogMessage {
     param(
@@ -384,8 +417,13 @@ $pushZipButton.Add_Click({
         Write-LogMessage "Please select a server list." -IsError
         return
     }
-
-    $cred = Get-GlobalCredential
+    
+    $serverListFile = ".\config\$selectedItem.txt"
+    $servers = Get-Content $serverListFile
+    $cred = Get-GlobalCredential -TestServer $servers[0]
+    if (-not $cred) {
+        return
+    }
 
     try {
         $serverListFile = ".\config\$selectedItem.txt"
