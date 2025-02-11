@@ -6,8 +6,7 @@ try {
     $config = Get-Content -Path ".\config\config.json" | ConvertFrom-Json
     
     $LogFile = $config.LogFile
-    $TargetMSIFileName = $config.TargetMSIFileName
-    $TargetMSIPathInZip = $config.TargetMSIPathInZip
+    $InstallerName = $config.InstallerName
     $YourAppPoolName = $config.AppPoolName
     $YourServiceName = $config.ServiceName
 
@@ -39,7 +38,8 @@ try {
     # Check for log rotation
     Move-Logs -LogFile $LogFile
 
-} catch {
+}
+catch {
     Write-Error "Failed to load configuration: $_"
     exit 1
 }
@@ -62,10 +62,12 @@ function Remove-TempFiles {
             finally {
                 Remove-PSSession -Session $session
             }
-        } else {
+        }
+        else {
             Write-LogMessage "Failed to create session for ${server}" -IsError
         }
-    } catch {
+    }
+    catch {
         Write-LogMessage "Error accessing ${server}: $($_.Exception.Message)" -IsError
     }
 }
@@ -90,10 +92,10 @@ $form.MinimumSize = New-Object System.Drawing.Size(600, 400)
 
 # Add form cleanup on close
 $form.Add_FormClosing({
-    param($formSender, $e)
-    if ($global:cred) { $global:cred = $null }
-    Get-Job | Remove-Job -Force -ErrorAction SilentlyContinue
-})
+        param($formSender, $e)
+        if ($global:cred) { $global:cred = $null }
+        Get-Job | Remove-Job -Force -ErrorAction SilentlyContinue
+    })
 
 # Add status strip
 $statusStrip = New-Object System.Windows.Forms.StatusStrip
@@ -157,19 +159,19 @@ $form.Controls.Add($zipFilePathBox)
 
 # Browse button click event
 $browseButton.Add_Click({
-    $folderDialog = New-Object System.Windows.Forms.FolderBrowserDialog
-    $folderDialog.Description = "Select folder"
-    $folderDialog.ShowNewFolderButton = $true
+        $folderDialog = New-Object System.Windows.Forms.FolderBrowserDialog
+        $folderDialog.Description = "Select folder"
+        $folderDialog.ShowNewFolderButton = $true
     
-    # Set initial directory from config
-    if ($config.DefaultBrowsePath -and (Test-Path $config.DefaultBrowsePath)) {
-        $folderDialog.SelectedPath = $config.DefaultBrowsePath
-    }
+        # Set initial directory from config
+        if ($config.DefaultBrowsePath -and (Test-Path $config.DefaultBrowsePath)) {
+            $folderDialog.SelectedPath = $config.DefaultBrowsePath
+        }
     
-    if ($folderDialog.ShowDialog() -eq "OK") {
-        $zipFilePathBox.Text = $folderDialog.SelectedPath
-    }
-})
+        if ($folderDialog.ShowDialog() -eq "OK") {
+            $zipFilePathBox.Text = $folderDialog.SelectedPath
+        }
+    })
 # Output TextBox
 $outputBox = New-Object System.Windows.Forms.RichTextBox
 $outputBox.Location = New-Object System.Drawing.Point(10, 110)
@@ -248,7 +250,8 @@ function Test-Credential {
             Write-LogMessage "Credential validation successful"
             return $true
         }
-    } catch {
+    }
+    catch {
         Write-LogMessage "Credential validation failed: $($_.Exception.Message)" -IsError
         $global:cred = $null  # Clear invalid credentials
         return $false
@@ -270,7 +273,8 @@ function Write-LogMessage {
         $outputBox.SelectionColor = [System.Drawing.Color]::Red
         $statusLabel.Text = "Error: $Message"
         $statusLabel.ForeColor = [System.Drawing.Color]::Red
-    } else {
+    }
+    else {
         $LogEntry = "[$Timestamp] INFO: $Message"
         Write-Host $LogEntry
         $outputBox.SelectionColor = [System.Drawing.Color]::Black
@@ -284,7 +288,8 @@ function Write-LogMessage {
         $progressLabel.Text = "$ProgressValue%"
         $progressLabel.Visible = $true
         [System.Windows.Forms.Application]::DoEvents()
-    } elseif ($ProgressValue -eq 100) {
+    }
+    elseif ($ProgressValue -eq 100) {
         $progressBar.Visible = $false
         $progressBar.Value = 0
         $progressLabel.Visible = $false
@@ -295,119 +300,122 @@ function Write-LogMessage {
     $outputBox.ScrollToCaret()
 }
 $syncButton.Add_Click({
-    $selectedItem = $dropdown.SelectedItem
-    if ($selectedItem -eq "Select Server List" -or -not $selectedItem) {
-        Write-LogMessage "Please select a server list." -IsError
-        return
-    }
-
-    $cred = Get-GlobalCredential
-    
-    # Get remote server path from config
-    $remotePath = $config.RemoteServer
-    if (-not $remotePath) {
-        Write-LogMessage "Remote server path not configured in config.json" -IsError
-        return
-    }
-
-    # Create local releases directory if it doesn't exist
-    $localPath = Join-Path $PSScriptRoot "releases"
-    if (-not (Test-Path $localPath)) {
-        New-Item -ItemType Directory -Path $localPath | Out-Null
-    }
-
-    try {
-        Write-LogMessage "Starting sync from $remotePath..." -ProgressValue 0
-
-        $job = Start-Job -ScriptBlock {
-            param ($remotePath, $localPath, [PSCredential]$cred)
-            
-            # Get all folders in remote path
-            $remoteFolders = Get-ChildItem -Path $remotePath -Directory -Credential $cred
-            $totalItems = $remoteFolders.Count
-            $current = 0
-        
-            foreach ($folder in $remoteFolders) {
-                $current++
-                $percentComplete = [math]::Floor(($current / $totalItems) * 100)
-                
-                Write-Output "###PROGRESS###:$percentComplete"
-                Write-Output "###STATUS###:Processing folder ($current/$totalItems): $($folder.Name)"
-                
-                $targetPath = Join-Path $localPath $folder.Name
-                
-                if (-not (Test-Path $targetPath)) {
-                    New-Item -ItemType Directory -Path $targetPath | Out-Null
-                    Write-Output "###STATUS###:Created new folder: $($folder.Name)"
-                }
-        
-                # Get remote files
-                $remoteFiles = Get-ChildItem -Path (Join-Path $folder.FullName "*") -Recurse -Credential $cred
-        
-                foreach ($remoteFile in $remoteFiles) {
-                    $relativePath = $remoteFile.FullName.Substring($folder.FullName.Length)
-                    $localFilePath = Join-Path $targetPath $relativePath
-                    
-                    $shouldCopy = $false
-                    
-                    if (-not (Test-Path $localFilePath)) {
-                        $shouldCopy = $true
-                        Write-Output "###STATUS###:New file found: $relativePath"
-                    } else {
-                        $localFile = Get-Item $localFilePath
-                        if ($remoteFile.LastWriteTime -gt $localFile.LastWriteTime) {
-                            $shouldCopy = $true
-                            Write-Output "###STATUS###:Updated file found: $relativePath"
-                        }
-                    }
-        
-                    if ($shouldCopy) {
-                        $localFolder = Split-Path $localFilePath -Parent
-                        if (-not (Test-Path $localFolder)) {
-                            New-Item -ItemType Directory -Path $localFolder -Force | Out-Null
-                        }
-                        Copy-Item -Path $remoteFile.FullName -Destination $localFilePath -Force -Credential $cred
-                    }
-                }
-                Write-Output "###COMPLETE###:$($folder.Name)"
-            }
-        } -ArgumentList $remotePath, $localPath, $cred
-
-       # Wait for sync to complete
-       while ($job.State -eq 'Running') {
-        $jobOutput = Receive-Job -Job $job
-        foreach ($line in $jobOutput) {
-            if ($line.StartsWith('###PROGRESS###:')) {
-                $progress = [int]($line.Split(':')[1])
-                $progressBar.Value = $progress
-            }
-            elseif ($line.StartsWith('###STATUS###:')) {
-                $status = $line.Split(':')[1]
-                Write-LogMessage $status
-            }
-            elseif ($line.StartsWith('###COMPLETE###:')) {
-                $folder = $line.Split(':')[1]
-                Write-LogMessage "Completed copying folder: $folder"
-            }
+        $selectedItem = $dropdown.SelectedItem
+        if ($selectedItem -eq "Select Server List" -or -not $selectedItem) {
+            Write-LogMessage "Please select a server list." -IsError
+            return
         }
-        Start-Sleep -Milliseconds 100
-    }
 
-    Receive-Job -Job $job | Out-Null
+        $cred = Get-GlobalCredential
     
-    if ($job.State -eq 'Completed') {
-        Write-LogMessage "Sync completed successfully." -ProgressValue 100
-    } else {
-        Write-LogMessage "Sync operation failed." -IsError
-    }
+        # Get remote server path from config
+        $remotePath = $config.RemoteServer
+        if (-not $remotePath) {
+            Write-LogMessage "Remote server path not configured in config.json" -IsError
+            return
+        }
 
-    Remove-Job -Job $job
+        # Create local releases directory if it doesn't exist
+        $localPath = Join-Path $PSScriptRoot "releases"
+        if (-not (Test-Path $localPath)) {
+            New-Item -ItemType Directory -Path $localPath | Out-Null
+        }
 
-    } catch {
-        Write-LogMessage "Error during sync: $($_.Exception.Message)" -IsError
-        $progressBar.Visible = $false
-    }
-})
+        try {
+            Write-LogMessage "Starting sync from $remotePath..." -ProgressValue 0
+
+            $job = Start-Job -ScriptBlock {
+                param ($remotePath, $localPath, [PSCredential]$cred)
+            
+                # Get all folders in remote path
+                $remoteFolders = Get-ChildItem -Path $remotePath -Directory -Credential $cred
+                $totalItems = $remoteFolders.Count
+                $current = 0
+        
+                foreach ($folder in $remoteFolders) {
+                    $current++
+                    $percentComplete = [math]::Floor(($current / $totalItems) * 100)
+                
+                    Write-Output "###PROGRESS###:$percentComplete"
+                    Write-Output "###STATUS###:Processing folder ($current/$totalItems): $($folder.Name)"
+                
+                    $targetPath = Join-Path $localPath $folder.Name
+                
+                    if (-not (Test-Path $targetPath)) {
+                        New-Item -ItemType Directory -Path $targetPath | Out-Null
+                        Write-Output "###STATUS###:Created new folder: $($folder.Name)"
+                    }
+        
+                    # Get remote files
+                    $remoteFiles = Get-ChildItem -Path (Join-Path $folder.FullName "*") -Recurse -Credential $cred
+        
+                    foreach ($remoteFile in $remoteFiles) {
+                        $relativePath = $remoteFile.FullName.Substring($folder.FullName.Length)
+                        $localFilePath = Join-Path $targetPath $relativePath
+                    
+                        $shouldCopy = $false
+                    
+                        if (-not (Test-Path $localFilePath)) {
+                            $shouldCopy = $true
+                            Write-Output "###STATUS###:New file found: $relativePath"
+                        }
+                        else {
+                            $localFile = Get-Item $localFilePath
+                            if ($remoteFile.LastWriteTime -gt $localFile.LastWriteTime) {
+                                $shouldCopy = $true
+                                Write-Output "###STATUS###:Updated file found: $relativePath"
+                            }
+                        }
+        
+                        if ($shouldCopy) {
+                            $localFolder = Split-Path $localFilePath -Parent
+                            if (-not (Test-Path $localFolder)) {
+                                New-Item -ItemType Directory -Path $localFolder -Force | Out-Null
+                            }
+                            Copy-Item -Path $remoteFile.FullName -Destination $localFilePath -Force -Credential $cred
+                        }
+                    }
+                    Write-Output "###COMPLETE###:$($folder.Name)"
+                }
+            } -ArgumentList $remotePath, $localPath, $cred
+
+            # Wait for sync to complete
+            while ($job.State -eq 'Running') {
+                $jobOutput = Receive-Job -Job $job
+                foreach ($line in $jobOutput) {
+                    if ($line.StartsWith('###PROGRESS###:')) {
+                        $progress = [int]($line.Split(':')[1])
+                        $progressBar.Value = $progress
+                    }
+                    elseif ($line.StartsWith('###STATUS###:')) {
+                        $status = $line.Split(':')[1]
+                        Write-LogMessage $status
+                    }
+                    elseif ($line.StartsWith('###COMPLETE###:')) {
+                        $folder = $line.Split(':')[1]
+                        Write-LogMessage "Completed copying folder: $folder"
+                    }
+                }
+                Start-Sleep -Milliseconds 100
+            }
+
+            Receive-Job -Job $job | Out-Null
+    
+            if ($job.State -eq 'Completed') {
+                Write-LogMessage "Sync completed successfully." -ProgressValue 100
+            }
+            else {
+                Write-LogMessage "Sync operation failed." -IsError
+            }
+
+            Remove-Job -Job $job
+
+        }
+        catch {
+            Write-LogMessage "Error during sync: $($_.Exception.Message)" -IsError
+            $progressBar.Visible = $false
+        }
+    })
 
 # Create temp directory if it doesn't exist
 $tempPath = Join-Path $PSScriptRoot "temp"
@@ -417,162 +425,189 @@ if (-not (Test-Path $tempPath)) {
 
 # Update Push ZIP button click event
 $pushZipButton.Add_Click({
-    $selectedFolder = $zipFilePathBox.Text
-    if (-not $selectedFolder) {
-        Write-LogMessage "Please select a folder to zip and push." -IsError
-        return
-    }
-
-    $selectedItem = $dropdown.SelectedItem
-    if ($selectedItem -eq "Select Server List" -or -not $selectedItem) {
-        Write-LogMessage "Please select a server list." -IsError
-        return
-    }
-
-    try {
-        # Create ZIP file
-        $folderName = Split-Path $selectedFolder -Leaf
-        $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-        $global:currentZipFileName = "${folderName}_${timestamp}.zip"
-        $zipFilePath = Join-Path $tempPath $global:currentZipFileName
-
-        Write-LogMessage "Creating ZIP file from selected folder..." -ProgressValue 0
-        
-        Add-Type -AssemblyName System.IO.Compression.FileSystem
-        [System.IO.Compression.ZipFile]::CreateFromDirectory($selectedFolder, $zipFilePath)
-        
-        Write-LogMessage "ZIP file created successfully: $zipFileName" -ProgressValue 25
-
-        # Get credentials and server list
-        $serverListFile = ".\config\$selectedItem.txt"
-        $servers = Get-Content $serverListFile
-        $cred = Get-GlobalCredential -TestServer $servers[0]
-        if (-not $cred) {
-            Remove-Item -Path $zipFilePath -Force
+        $selectedFolder = $zipFilePathBox.Text
+        if (-not $selectedFolder) {
+            Write-LogMessage "Please select a folder to zip and push." -IsError
             return
         }
 
-        $totalServers = ($servers | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }).Count
-        $currentServer = 0
+        $selectedItem = $dropdown.SelectedItem
+        if ($selectedItem -eq "Select Server List" -or -not $selectedItem) {
+            Write-LogMessage "Please select a server list." -IsError
+            return
+        }
 
-        # Push ZIP to servers
-        foreach ($server in $servers) {
-            if (-not [string]::IsNullOrWhiteSpace($server)) {
-                $currentServer++
-                $progress = 25 + [math]::Floor(($currentServer / $totalServers) * 75)  # Scale progress from 25-100
-                $progressBar.Value = $progress
-                Update-Progress -Current $currentServer -Total $totalServers -Operation "Pushing ZIP to servers"
+        try {
+            # Create ZIP file
+            $folderName = Split-Path $selectedFolder -Leaf
+            $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
+            $global:currentZipFileName = "${folderName}_${timestamp}.zip"
+            $zipFilePath = Join-Path $tempPath $global:currentZipFileName
 
-                try {
-                    $destinationPath = "\\${server}\C$\temp"
-                    $job = Start-Job -ScriptBlock {
-                        param ($zipFilePath, $destinationPath, [PSCredential]$cred)
-                        Copy-Item -Path $zipFilePath -Destination $destinationPath -Credential $cred -Force
-                    } -ArgumentList $zipFilePath, $destinationPath, $cred
+            Write-LogMessage "Creating ZIP file from selected folder..." -ProgressValue 0
+        
+            Add-Type -AssemblyName System.IO.Compression.FileSystem
+            [System.IO.Compression.ZipFile]::CreateFromDirectory($selectedFolder, $zipFilePath)
+        
+            Write-LogMessage "ZIP file created successfully: $zipFileName" -ProgressValue 25
 
-                    $job | Wait-Job
-                    $jobOutput = Receive-Job -Job $job
+            # Get credentials and server list
+            $serverListFile = ".\config\$selectedItem.txt"
+            $servers = Get-Content $serverListFile
+            $cred = Get-GlobalCredential -TestServer $servers[0]
+            if (-not $cred) {
+                Remove-Item -Path $zipFilePath -Force
+                return
+            }
 
-                    if ($job.State -eq 'Completed') {
-                        Write-LogMessage "Copy of ${zipFileName} to ${server} completed successfully."
-                    } else {
-                        Write-LogMessage "Copy of ${zipFileName} to ${server} failed." -IsError
+            $totalServers = ($servers | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }).Count
+            $currentServer = 0
+
+            # Push ZIP to servers
+            foreach ($server in $servers) {
+                if (-not [string]::IsNullOrWhiteSpace($server)) {
+                    $currentServer++
+                    $progress = 25 + [math]::Floor(($currentServer / $totalServers) * 75)  # Scale progress from 25-100
+                    $progressBar.Value = $progress
+                    Update-Progress -Current $currentServer -Total $totalServers -Operation "Pushing ZIP to servers"
+
+                    try {
+                        $destinationPath = "\\${server}\C$\temp"
+                        $job = Start-Job -ScriptBlock {
+                            param ($zipFilePath, $destinationPath, [PSCredential]$cred)
+                            Copy-Item -Path $zipFilePath -Destination $destinationPath -Credential $cred -Force
+                        } -ArgumentList $zipFilePath, $destinationPath, $cred
+
+                        $job | Wait-Job
+                        $jobOutput = Receive-Job -Job $job
+
+                        if ($job.State -eq 'Completed') {
+                            Write-LogMessage "Copy of ${zipFileName} to ${server} completed successfully."
+                        }
+                        else {
+                            Write-LogMessage "Copy of ${zipFileName} to ${server} failed." -IsError
+                        }
+
+                        $outputBox.AppendText($jobOutput + [Environment]::NewLine)
+                        Remove-Job -Job $job
                     }
-
-                    $outputBox.AppendText($jobOutput + [Environment]::NewLine)
-                    Remove-Job -Job $job
-                } catch {
-                    Write-LogMessage "Error copying ${zipFileName} to ${server}: $($_.Exception.Message)" -IsError
+                    catch {
+                        Write-LogMessage "Error copying ${zipFileName} to ${server}: $($_.Exception.Message)" -IsError
+                    }
                 }
             }
-        }
 
-        Write-LogMessage "Push operation completed." -ProgressValue 100
+            Write-LogMessage "Push operation completed." -ProgressValue 100
         
-        # Cleanup temp ZIP file
-        Remove-Item -Path $zipFilePath -Force
-
-    } catch {
-        Write-LogMessage "Error during operation: $($_.Exception.Message)" -IsError
-        $progressBar.Visible = $false
-        if (Test-Path $zipFilePath) {
+            # Cleanup temp ZIP file
             Remove-Item -Path $zipFilePath -Force
+
         }
-    }
-})
+        catch {
+            Write-LogMessage "Error during operation: $($_.Exception.Message)" -IsError
+            $progressBar.Visible = $false
+            if (Test-Path $zipFilePath) {
+                Remove-Item -Path $zipFilePath -Force
+            }
+        }
+    })
 
 # Install MSI button click event
 $installMsiButton.Add_Click({
-    if (-not $global:currentZipFileName) {
-        Write-LogMessage "Please push a ZIP file first." -IsError
-        return
-    }
-
-    $selectedItem = $dropdown.SelectedItem
-    if ($selectedItem -eq "Select Server List" -or -not $selectedItem) {
-        Write-LogMessage "Please select a server list." -IsError
-        return
-    }
-
-    $cred = Get-GlobalCredential
-
-    try {
-        $serverListFile = ".\config\$selectedItem.txt"
-        $servers = Get-Content $serverListFile
-        $totalServers = ($servers | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }).Count
-        $currentServer = 0
-
-        foreach ($server in $servers) {
-            if (-not [string]::IsNullOrWhiteSpace($server)) {
-                $currentServer++
-                Update-Progress -Current $currentServer -Total $totalServers -Operation "Installing MSI on servers"
-
-                try {
-                    $job = Start-Job -ScriptBlock {
-                        param ($server, [PSCredential]$cred, $zipFileName)
-                        $session = New-PSSession -ComputerName $server -Credential $cred
-                        Invoke-Command -Session $session -ScriptBlock {
-                            param ($zipFileName)
-                            Write-Host "Executing commands on $env:COMPUTERNAME"
-                            $zipPath = "C:\temp\$zipFileName"
-                            $extractPath = "C:\temp\extracted"
-                            Add-Type -AssemblyName System.IO.Compression.FileSystem
-                            [System.IO.Compression.ZipFile]::ExtractToDirectory($zipPath, $extractPath)
-                            $msiPath = Join-Path -Path $extractPath -ChildPath $TargetMSIFileName
-                            Start-Process msiexec.exe -ArgumentList "/i `"$msiPath`" /quiet /norestart" -Wait -NoNewWindow
-                            Restart-Service -Name 'W3SVC'
-                            Import-Module WebAdministration
-                            Restart-WebAppPool -Name $YourAppPoolName
-                            Restart-Service -Name $YourServiceName
-                            "Commands executed on $env:COMPUTERNAME" | Out-File "C:\temp\log.txt"
-                        } -ArgumentList $zipFileName
-                        Remove-PSSession -Session $session
-                    } -ArgumentList $server, $cred, $global:currentZipFileName
-
-                    $job | Wait-Job
-                    $jobOutput = Receive-Job -Job $job
-
-                    if ($job.State -eq 'Completed') {
-                        Write-LogMessage "Commands executed on ${server} successfully."
-                        Remove-TempFiles -server $server
-                    } else {
-                        Write-LogMessage "Commands execution on ${server} failed." -IsError
-                    }
-
-                    $outputBox.AppendText($jobOutput + [Environment]::NewLine)
-                    Remove-Job -Job $job
-                } catch {
-                    Write-LogMessage "Error executing commands on ${server}: $($_.Exception.Message)" -IsError
-                }
-            }
+        if (-not $global:currentZipFileName) {
+            Write-LogMessage "Please push a ZIP file first." -IsError
+            return
         }
 
-        Write-LogMessage "Installation completed." -ProgressValue 100
-    } catch {
-        Write-LogMessage "Error reading server list file '$serverListFile': $($_.Exception.Message)" -IsError
-        $progressBar.Visible = $false
-    }
-})
+        $selectedItem = $dropdown.SelectedItem
+        if ($selectedItem -eq "Select Server List" -or -not $selectedItem) {
+            Write-LogMessage "Please select a server list." -IsError
+            return
+        }
+
+        $cred = Get-GlobalCredential
+
+        try {
+            $serverListFile = ".\config\$selectedItem.txt"
+            $servers = Get-Content $serverListFile
+            $totalServers = ($servers | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }).Count
+            $currentServer = 0
+
+            foreach ($server in $servers) {
+                if (-not [string]::IsNullOrWhiteSpace($server)) {
+                    $currentServer++
+                    Update-Progress -Current $currentServer -Total $totalServers -Operation "Installing MSI on servers"
+
+                    try {
+                        $job = Start-Job -ScriptBlock {
+                            param ($server, [PSCredential]$cred, $zipFileName)
+                            $session = New-PSSession -ComputerName $server -Credential $cred
+                            Invoke-Command -Session $session -ScriptBlock {
+                                param ($zipFileName)
+                                Write-Host "###PROGRESS###:Preparing installation on $env:COMPUTERNAME"
+                                $zipPath = "C:\temp\$zipFileName"
+                                $extractPath = "C:\temp\extracted"
+    
+                                Write-Host "###PROGRESS###:Extracting ZIP file"
+                                Add-Type -AssemblyName System.IO.Compression.FileSystem
+                                [System.IO.Compression.ZipFile]::ExtractToDirectory($zipPath, $extractPath)
+                                $exeFile = Get-ChildItem -Path $extractPath -Filter "*.exe" -Recurse | Select-Object -First 1
+                                if ($exeFile) {
+                                    Write-Host "###PROGRESS###:Found executable: $($exeFile.Name)"
+                                    try {
+                                        Write-Host "###PROGRESS###:Starting installation"
+                                        $process = Start-Process -FilePath $exeFile.FullName -ArgumentList "install" -Wait -NoNewWindow -PassThru
+
+                                        if ($process.ExitCode -eq 0) {
+                                            Write-Host "###PROGRESS###:Installation completed successfully (Exit Code: 0)"
+                                        }
+                                        else {
+                                            throw "Installation failed with exit code: $($process.ExitCode)"
+                                        }
+                                        Write-Host "###PROGRESS###:Restarting services"
+                                        Restart-Service -Name 'W3SVC'
+                                        Import-Module WebAdministration
+                                        Restart-WebAppPool -Name $using:YourAppPoolName
+                                        Restart-Service -Name $using:YourServiceName
+                                        Write-Host "###PROGRESS###:Services restarted successfully"
+                                    }
+                                    catch {
+                                        throw "Installation failed: $_"
+                                    }
+                                }
+                                else {
+                                    throw "No EXE file found in extracted contents"
+                                }
+                            } -ArgumentList $zipFileName
+                            Remove-PSSession -Session $session
+                        } -ArgumentList $server, $cred, $global:currentZipFileName
+
+                        $job | Wait-Job
+                        $jobOutput = Receive-Job -Job $job
+                        
+                        foreach ($line in $jobOutput) {
+                            if ($line.StartsWith('###PROGRESS###:')) {
+                                $status = $line.Split(':')[1]
+                                Write-LogMessage $status -ProgressValue ([math]::Floor(($currentServer / $totalServers) * 100))
+                                [System.Windows.Forms.Application]::DoEvents()
+                            } else {
+                                $outputBox.AppendText($line + [Environment]::NewLine)
+                            }
+                        }
+                    }
+                    catch {
+                        Write-LogMessage "Error executing commands on ${server}: $($_.Exception.Message)" -IsError
+                    }
+                }
+            }
+
+            Write-LogMessage "Installation completed." -ProgressValue 100
+        }
+        catch {
+            Write-LogMessage "Error reading server list file '$serverListFile': $($_.Exception.Message)" -IsError
+            $progressBar.Visible = $false
+        }
+    })
 
 # Center buttons initially
 Set-ButtonsAlignment

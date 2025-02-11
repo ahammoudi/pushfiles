@@ -1,7 +1,6 @@
 {
     "LogFile": "deployment.log",
-    "TargetMSIFileName": "setup.msi",
-    "TargetMSIPathInZip": "setup/setup.msi",
+    "InstallerName": "setup.exe",
     "AppPoolName": "YourAppPool",
     "ServiceName": "YourService",
     "DefaultBrowsePath": "C:\\temp"
