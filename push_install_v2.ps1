@@ -433,8 +433,8 @@ $pushZipButton.Add_Click({
         # Create ZIP file
         $folderName = Split-Path $selectedFolder -Leaf
         $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-        $zipFileName = "${folderName}_${timestamp}.zip"
-        $zipFilePath = Join-Path $tempPath $zipFileName
+        $global:currentZipFileName = "${folderName}_${timestamp}.zip"
+        $zipFilePath = Join-Path $tempPath $global:currentZipFileName
 
         Write-LogMessage "Creating ZIP file from selected folder..." -ProgressValue 0
         
@@ -460,6 +460,7 @@ $pushZipButton.Add_Click({
             if (-not [string]::IsNullOrWhiteSpace($server)) {
                 $currentServer++
                 $progress = 25 + [math]::Floor(($currentServer / $totalServers) * 75)  # Scale progress from 25-100
+                $progressBar.Value = $progress
                 Update-Progress -Current $currentServer -Total $totalServers -Operation "Pushing ZIP to servers"
 
                 try {
@@ -502,8 +503,10 @@ $pushZipButton.Add_Click({
 
 # Install MSI button click event
 $installMsiButton.Add_Click({
-    $zipFilePath = $zipFilePathBox.Text
-    $fileName = Split-Path -Path $zipFilePath -Leaf
+    if (-not $global:currentZipFileName) {
+        Write-LogMessage "Please push a ZIP file first." -IsError
+        return
+    }
 
     $selectedItem = $dropdown.SelectedItem
     if ($selectedItem -eq "Select Server List" -or -not $selectedItem) {
@@ -526,12 +529,12 @@ $installMsiButton.Add_Click({
 
                 try {
                     $job = Start-Job -ScriptBlock {
-                        param ($server, [PSCredential]$cred, $fileName)
+                        param ($server, [PSCredential]$cred, $zipFileName)
                         $session = New-PSSession -ComputerName $server -Credential $cred
                         Invoke-Command -Session $session -ScriptBlock {
-                            param ($fileName)
+                            param ($zipFileName)
                             Write-Host "Executing commands on $env:COMPUTERNAME"
-                            $zipPath = "C:\temp\$fileName"
+                            $zipPath = "C:\temp\$zipFileName"
                             $extractPath = "C:\temp\extracted"
                             Add-Type -AssemblyName System.IO.Compression.FileSystem
                             [System.IO.Compression.ZipFile]::ExtractToDirectory($zipPath, $extractPath)
@@ -542,9 +545,9 @@ $installMsiButton.Add_Click({
                             Restart-WebAppPool -Name $YourAppPoolName
                             Restart-Service -Name $YourServiceName
                             "Commands executed on $env:COMPUTERNAME" | Out-File "C:\temp\log.txt"
-                        } -ArgumentList $fileName
+                        } -ArgumentList $zipFileName
                         Remove-PSSession -Session $session
-                    } -ArgumentList $server, $cred, $fileName
+                    } -ArgumentList $server, $cred, $global:currentZipFileName
 
                     $job | Wait-Job
                     $jobOutput = Receive-Job -Job $job
