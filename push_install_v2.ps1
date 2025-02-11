@@ -161,6 +161,11 @@ $browseButton.Add_Click({
     $folderDialog.Description = "Select folder"
     $folderDialog.ShowNewFolderButton = $true
     
+    # Set initial directory from config
+    if ($config.DefaultBrowsePath -and (Test-Path $config.DefaultBrowsePath)) {
+        $folderDialog.SelectedPath = $config.DefaultBrowsePath
+    }
+    
     if ($folderDialog.ShowDialog() -eq "OK") {
         $zipFilePathBox.Text = $folderDialog.SelectedPath
     }

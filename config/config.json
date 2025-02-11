@@ -1,7 +1,8 @@
 {
-    "LogFile": "C:\\temp\\deployment_log.txt",
-    "TargetMSIFileName": "abc.msi",
-    "TargetMSIPathInZip": "install/abc.msi",
-    "AppPoolName": "YourAppPoolName",
-    "ServiceName": "YourServiceName"
+    "LogFile": "deployment.log",
+    "TargetMSIFileName": "setup.msi",
+    "TargetMSIPathInZip": "setup/setup.msi",
+    "AppPoolName": "YourAppPool",
+    "ServiceName": "YourService",
+    "DefaultBrowsePath": "C:\\temp"
 }
