@@ -110,6 +110,15 @@ $progressBar.Style = 'Continuous'
 $progressBar.Visible = $false
 $form.Controls.Add($progressBar)
 
+$progressLabel = New-Object System.Windows.Forms.Label
+$progressLabel.Location = New-Object System.Drawing.Point(620, 65)  # Position above progress bar
+$progressLabel.Width = 150
+$progressLabel.Height = 20
+$progressLabel.Text = "0%"
+$progressLabel.TextAlign = [System.Drawing.ContentAlignment]::MiddleRight
+$progressLabel.Visible = $false
+$form.Controls.Add($progressLabel)
+
 # Drop-down list (ComboBox) for server list files
 $dropdown = New-Object System.Windows.Forms.ComboBox
 $dropdown.Location = New-Object System.Drawing.Point(10, 10)
@@ -234,9 +243,13 @@ function Write-LogMessage {
     if ($ProgressValue -ge 0) {
         $progressBar.Visible = $true
         $progressBar.Value = $ProgressValue
+        $progressLabel.Text = "$ProgressValue%"
+        $progressLabel.Visible = $true
+        [System.Windows.Forms.Application]::DoEvents()
     } elseif ($ProgressValue -eq 100) {
         $progressBar.Visible = $false
         $progressBar.Value = 0
+        $progressLabel.Visible = $false
     }
 
     Add-Content -Path $LogFile -Value $LogEntry
