@@ -409,11 +409,17 @@ $syncButton.Add_Click({
     }
 })
 
-# Push ZIP button click event
+# Create temp directory if it doesn't exist
+$tempPath = Join-Path $PSScriptRoot "temp"
+if (-not (Test-Path $tempPath)) {
+    New-Item -ItemType Directory -Path $tempPath | Out-Null
+}
+
+# Update Push ZIP button click event
 $pushZipButton.Add_Click({
-    $zipFilePath = $zipFilePathBox.Text
-    if (-not $zipFilePath) {
-        Write-LogMessage "Please select a ZIP file to push." -IsError
+    $selectedFolder = $zipFilePathBox.Text
+    if (-not $selectedFolder) {
+        Write-LogMessage "Please select a folder to zip and push." -IsError
         return
     }
 
@@ -422,23 +428,38 @@ $pushZipButton.Add_Click({
         Write-LogMessage "Please select a server list." -IsError
         return
     }
-    
-    $serverListFile = ".\config\$selectedItem.txt"
-    $servers = Get-Content $serverListFile
-    $cred = Get-GlobalCredential -TestServer $servers[0]
-    if (-not $cred) {
-        return
-    }
 
     try {
+        # Create ZIP file
+        $folderName = Split-Path $selectedFolder -Leaf
+        $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
+        $zipFileName = "${folderName}_${timestamp}.zip"
+        $zipFilePath = Join-Path $tempPath $zipFileName
+
+        Write-LogMessage "Creating ZIP file from selected folder..." -ProgressValue 0
+        
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        [System.IO.Compression.ZipFile]::CreateFromDirectory($selectedFolder, $zipFilePath)
+        
+        Write-LogMessage "ZIP file created successfully: $zipFileName" -ProgressValue 25
+
+        # Get credentials and server list
         $serverListFile = ".\config\$selectedItem.txt"
         $servers = Get-Content $serverListFile
+        $cred = Get-GlobalCredential -TestServer $servers[0]
+        if (-not $cred) {
+            Remove-Item -Path $zipFilePath -Force
+            return
+        }
+
         $totalServers = ($servers | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }).Count
         $currentServer = 0
 
+        # Push ZIP to servers
         foreach ($server in $servers) {
             if (-not [string]::IsNullOrWhiteSpace($server)) {
                 $currentServer++
+                $progress = 25 + [math]::Floor(($currentServer / $totalServers) * 75)  # Scale progress from 25-100
                 Update-Progress -Current $currentServer -Total $totalServers -Operation "Pushing ZIP to servers"
 
                 try {
@@ -452,23 +473,30 @@ $pushZipButton.Add_Click({
                     $jobOutput = Receive-Job -Job $job
 
                     if ($job.State -eq 'Completed') {
-                        Write-LogMessage "Copy of ${zipFilePath} to ${server} completed successfully."
+                        Write-LogMessage "Copy of ${zipFileName} to ${server} completed successfully."
                     } else {
-                        Write-LogMessage "Copy of ${zipFilePath} to ${server} failed." -IsError
+                        Write-LogMessage "Copy of ${zipFileName} to ${server} failed." -IsError
                     }
 
                     $outputBox.AppendText($jobOutput + [Environment]::NewLine)
                     Remove-Job -Job $job
                 } catch {
-                    Write-LogMessage "Error copying ${zipFilePath} to ${server}: $($_.Exception.Message)" -IsError
+                    Write-LogMessage "Error copying ${zipFileName} to ${server}: $($_.Exception.Message)" -IsError
                 }
             }
         }
 
         Write-LogMessage "Push operation completed." -ProgressValue 100
+        
+        # Cleanup temp ZIP file
+        Remove-Item -Path $zipFilePath -Force
+
     } catch {
-        Write-LogMessage "Error reading server list file '$serverListFile': $($_.Exception.Message)" -IsError
+        Write-LogMessage "Error during operation: $($_.Exception.Message)" -IsError
         $progressBar.Visible = $false
+        if (Test-Path $zipFilePath) {
+            Remove-Item -Path $zipFilePath -Force
+        }
     }
 })
 
