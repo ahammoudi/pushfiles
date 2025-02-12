@@ -215,18 +215,26 @@ $installMsiButton.Width = 160
 $installMsiButton.Height = 40
 $form.Controls.Add($installMsiButton)
 
+# Back Out button
+$backOutButton = New-Object System.Windows.Forms.Button
+$backOutButton.Text = "Back Out"
+$backOutButton.Width = 160
+$backOutButton.Height = 40
+$form.Controls.Add($backOutButton)
+
 # Function to center buttons
 function Set-ButtonsAlignment {
     $formWidth = [int]$form.ClientSize.Width
     $buttonWidth = [int]$pushZipButton.Width
     $spacing = [int]20
-    $totalWidth = [int](($buttonWidth * 3) + ($spacing * 2))
+    $totalWidth = [int](($buttonWidth * 4) + ($spacing * 3))  # Updated for 4 buttons
     $startX = [int](($formWidth - $totalWidth) / 2)
     $y = [int]($outputBox.Location.Y + $outputBox.Height + 10)
 
     $pushZipButton.Location = New-Object System.Drawing.Point($startX, $y)
     $installMsiButton.Location = New-Object System.Drawing.Point(($startX + $buttonWidth + $spacing), $y)
-    $syncButton.Location = New-Object System.Drawing.Point(($startX + ($buttonWidth + $spacing) * 2), $y)
+    $backOutButton.Location = New-Object System.Drawing.Point(($startX + ($buttonWidth + $spacing) * 2), $y)
+    $syncButton.Location = New-Object System.Drawing.Point(($startX + ($buttonWidth + $spacing) * 3), $y)
 }
 
 # Add resize event handler
@@ -754,6 +762,104 @@ $installMsiButton.Add_Click({
             $progressBar.Visible = $false
         }
     })
+
+# Add Back Out button click event
+$backOutButton.Add_Click({
+    if (-not $global:currentZipFileName) {
+        Write-LogMessage "Please push a ZIP file first." -IsError
+        return
+    }
+
+    $selectedItem = $dropdown.SelectedItem
+    if ($selectedItem -eq "Select Server List" -or -not $selectedItem) {
+        Write-LogMessage "Please select a server list." -IsError
+        return
+    }
+
+    $cred = Get-GlobalCredential
+
+    try {
+        $serverListFile = ".\config\$selectedItem.txt"
+        $servers = Get-Content $serverListFile
+        $totalServers = ($servers | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }).Count
+        $currentServer = 0
+
+        foreach ($server in $servers) {
+            if (-not [string]::IsNullOrWhiteSpace($server)) {
+                $currentServer++
+                Update-Progress -Current $currentServer -Total $totalServers -Operation "Executing back out on servers"
+
+                try {
+                    $job = Start-Job -ScriptBlock {
+                        param ($server, [PSCredential]$cred, $zipFileName)
+                        $session = New-PSSession -ComputerName $server -Credential $cred
+                        Invoke-Command -Session $session -ScriptBlock {
+                            param ($zipFileName)
+                            Write-Host "###PROGRESS###:Preparing back out on $env:COMPUTERNAME"
+                            $zipPath = "C:\temp\$zipFileName"
+                            $extractPath = "C:\temp\extracted"
+
+                            Write-Host "###PROGRESS###:Extracting ZIP file"
+                            Add-Type -AssemblyName System.IO.Compression.FileSystem
+                            [System.IO.Compression.ZipFile]::ExtractToDirectory($zipPath, $extractPath)
+                            $exeFile = Get-ChildItem -Path $extractPath -Filter "*.exe" -Recurse | Select-Object -First 1
+                            if ($exeFile) {
+                                Write-Host "###PROGRESS###:Found executable: $($exeFile.Name)"
+                                try {
+                                    Write-Host "###PROGRESS###:Starting back out"
+                                    $process = Start-Process -FilePath $exeFile.FullName -ArgumentList "uninstall" -Wait -NoNewWindow -PassThru
+
+                                    if ($process.ExitCode -eq 0) {
+                                        Write-Host "###PROGRESS###:Back out completed successfully (Exit Code: 0)"
+                                    }
+                                    else {
+                                        throw "Back out failed with exit code: $($process.ExitCode)"
+                                    }
+                                    Write-Host "###PROGRESS###:Restarting services"
+                                    Restart-Service -Name 'W3SVC'
+                                    Import-Module WebAdministration
+                                    Restart-WebAppPool -Name $using:YourAppPoolName
+                                    Restart-Service -Name $using:YourServiceName
+                                    Write-Host "###PROGRESS###:Services restarted successfully"
+                                }
+                                catch {
+                                    throw "Back out failed: $_"
+                                }
+                            }
+                            else {
+                                throw "No EXE file found in extracted contents"
+                            }
+                        } -ArgumentList $zipFileName
+                        Remove-PSSession -Session $session
+                    } -ArgumentList $server, $cred, $global:currentZipFileName
+
+                    $job | Wait-Job
+                    $jobOutput = Receive-Job -Job $job
+                    
+                    foreach ($line in $jobOutput) {
+                        if ($line.StartsWith('###PROGRESS###:')) {
+                            $status = $line.Split(':')[1]
+                            Write-LogMessage $status -ProgressValue ([math]::Floor(($currentServer / $totalServers) * 100))
+                            [System.Windows.Forms.Application]::DoEvents()
+                        }
+                        else {
+                            $outputBox.AppendText($line + [Environment]::NewLine)
+                        }
+                    }
+                }
+                catch {
+                    Write-LogMessage "Error executing commands on ${server}: $($_.Exception.Message)" -IsError
+                }
+            }
+        }
+
+        Write-LogMessage "Back out completed." -ProgressValue 100
+    }
+    catch {
+        Write-LogMessage "Error reading server list file '$serverListFile': $($_.Exception.Message)" -IsError
+        $progressBar.Visible = $false
+    }
+})
 
 # Center buttons initially
 Set-ButtonsAlignment
