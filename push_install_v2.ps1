@@ -307,123 +307,184 @@ function Write-LogMessage {
     $outputBox.AppendText($LogEntry + [Environment]::NewLine)
     $outputBox.ScrollToCaret()
 }
+
+
 $syncButton.Add_Click({
-        $selectedItem = $dropdown.SelectedItem
-        if ($selectedItem -eq "Select Server List" -or -not $selectedItem) {
-            Write-LogMessage "Please select a server list." -IsError
-            return
-        }
+    $selectedItem = $dropdown.SelectedItem
+    if ($selectedItem -eq "Select Server List" -or -not $selectedItem) {
+        Write-LogMessage "Please select a server list." -IsError
+        return
+    }
 
-        $cred = Get-GlobalCredential
+    $cred = Get-GlobalCredential
     
-        # Get remote server path from config
-        $remotePath = $config.RemoteServer
-        if (-not $remotePath) {
-            Write-LogMessage "Remote server path not configured in config.json" -IsError
-            return
-        }
+    # Get remote server path from config
+    $remotePath = $config.RemoteServer
+    if (-not $remotePath) {
+        Write-LogMessage "Remote server path not configured in config.json" -IsError
+        return
+    }
 
-        # Create local releases directory if it doesn't exist
-        $localPath = Join-Path $PSScriptRoot "releases"
-        if (-not (Test-Path $localPath)) {
-            New-Item -ItemType Directory -Path $localPath | Out-Null
-        }
+    # Create local releases directory if it doesn't exist
+    $localPath = Join-Path $PSScriptRoot "releases"
+    if (-not (Test-Path $localPath)) {
+        New-Item -ItemType Directory -Path $localPath | Out-Null
+    }
 
-        try {
-            Write-LogMessage "Starting sync from $remotePath..." -ProgressValue 0
+    try {
+        Write-LogMessage "Starting sync from $remotePath..." -ProgressValue 0
 
-            $job = Start-Job -ScriptBlock {
-                param ($remotePath, $localPath, [PSCredential]$cred)
+        $job = Start-Job -ScriptBlock {
+            param ($remotePath, $localPath, [PSCredential]$cred)
             
-                # Get all folders in remote path
-                $remoteFolders = Get-ChildItem -Path $remotePath -Directory -Credential $cred
+            try {
+                # Better UNC path handling
+                $remoteServer = if ($remotePath -match '\\\\([^\\]+)') {
+                    $matches[1]
+                } else {
+                    throw "Invalid remote path format. Expected UNC path."
+                }
+                $session = New-PSSession -ComputerName $remoteServer -Credential $cred
+                
+                if (-not $session) {
+                    throw "Failed to create session"
+                }
+
+                # Get all folders using the session
+                $remoteFolders = Invoke-Command -Session $session -ScriptBlock {
+                    param($path)
+                    Get-ChildItem -Path $path -Directory
+                } -ArgumentList $remotePath
+
                 $totalItems = $remoteFolders.Count
                 $current = 0
-        
+
                 foreach ($folder in $remoteFolders) {
                     $current++
-                    $percentComplete = [math]::Floor(($current / $totalItems) * 100)
-                
+                    $percentComplete = if ($totalItems -gt 0) {
+                        [math]::Floor(($current / $totalItems) * 100)
+                    } else {
+                        0
+                    }
+                    
                     Write-Output "###PROGRESS###:$percentComplete"
                     Write-Output "###STATUS###:Processing folder ($current/$totalItems): $($folder.Name)"
-                
+                    
                     $targetPath = Join-Path $localPath $folder.Name
-                
+                    
                     if (-not (Test-Path $targetPath)) {
-                        New-Item -ItemType Directory -Path $targetPath | Out-Null
+                        New-Item -ItemType Directory -Path $targetPath -Force | Out-Null
                         Write-Output "###STATUS###:Created new folder: $($folder.Name)"
                     }
-        
-                    # Get remote files
-                    $remoteFiles = Get-ChildItem -Path (Join-Path $folder.FullName "*") -Recurse -Credential $cred
-        
+
+                    # Get remote files using session with error handling
+                    $remoteFiles = Invoke-Command -Session $session -ScriptBlock {
+                        param($folderPath)
+                        if (Test-Path $folderPath) {
+                            Get-ChildItem -Path $folderPath -Recurse -File
+                        } else {
+                            Write-Output "###ERROR###:Remote folder not found: $folderPath"
+                            return $null
+                        }
+                    } -ArgumentList (Join-Path $remotePath $folder.Name)
+
                     foreach ($remoteFile in $remoteFiles) {
-                        $relativePath = $remoteFile.FullName.Substring($folder.FullName.Length)
-                        $localFilePath = Join-Path $targetPath $relativePath
-                    
+                        $relativePath = $remoteFile.FullName.Substring($remotePath.Length + 1)
+                        $localFilePath = Join-Path $localPath $relativePath
+                        
                         $shouldCopy = $false
-                    
+                        
                         if (-not (Test-Path $localFilePath)) {
                             $shouldCopy = $true
                             Write-Output "###STATUS###:New file found: $relativePath"
-                        }
-                        else {
+                        } else {
                             $localFile = Get-Item $localFilePath
                             if ($remoteFile.LastWriteTime -gt $localFile.LastWriteTime) {
                                 $shouldCopy = $true
                                 Write-Output "###STATUS###:Updated file found: $relativePath"
                             }
                         }
-        
+
                         if ($shouldCopy) {
                             $localFolder = Split-Path $localFilePath -Parent
                             if (-not (Test-Path $localFolder)) {
                                 New-Item -ItemType Directory -Path $localFolder -Force | Out-Null
                             }
-                            Copy-Item -Path $remoteFile.FullName -Destination $localFilePath -Force -Credential $cred
+                            Copy-Item -Path $remoteFile.FullName -Destination $localFilePath -FromSession $session -Force
                         }
                     }
                     Write-Output "###COMPLETE###:$($folder.Name)"
                 }
-            } -ArgumentList $remotePath, $localPath, $cred
 
-            # Wait for sync to complete
-            while ($job.State -eq 'Running') {
-                $jobOutput = Receive-Job -Job $job
-                foreach ($line in $jobOutput) {
-                    if ($line.StartsWith('###PROGRESS###:')) {
-                        $progress = [int]($line.Split(':')[1])
-                        $progressBar.Value = $progress
-                    }
-                    elseif ($line.StartsWith('###STATUS###:')) {
-                        $status = $line.Split(':')[1]
-                        Write-LogMessage $status
-                    }
-                    elseif ($line.StartsWith('###COMPLETE###:')) {
-                        $folder = $line.Split(':')[1]
-                        Write-LogMessage "Completed copying folder: $folder"
-                    }
+                # Cleanup session
+                Remove-PSSession -Session $session
+
+            } catch {
+                Write-Output "###ERROR###:$($_.Exception.Message)"
+                if ($session) {
+                    Remove-PSSession -Session $session
                 }
-                Start-Sleep -Milliseconds 100
             }
+        } -ArgumentList $remotePath, $localPath, $cred
 
-            Receive-Job -Job $job | Out-Null
-    
-            if ($job.State -eq 'Completed') {
-                Write-LogMessage "Sync completed successfully." -ProgressValue 100
+        # Monitor job progress
+        while ($job.State -eq 'Running') {
+            $jobOutput = Receive-Job -Job $job
+            foreach ($line in $jobOutput) {
+                if ($line.StartsWith('###PROGRESS###:')) {
+                    $progress = [int]($line.Split(':')[1])
+                    Write-LogMessage "Sync progress" -ProgressValue $progress
+                }
+                elseif ($line.StartsWith('###STATUS###:')) {
+                    $status = $line.Split(':')[1]
+                    Write-LogMessage $status
+                }
+                elseif ($line.StartsWith('###COMPLETE###:')) {
+                    $folder = $line.Split(':')[1]
+                    Write-LogMessage "Completed syncing folder: $folder"
+                }
+                elseif ($line.StartsWith('###ERROR###:')) {
+                    Write-LogMessage $line.Split(':')[1] -IsError
+                }
             }
-            else {
-                Write-LogMessage "Sync operation failed." -IsError
-            }
-
-            Remove-Job -Job $job
-
+            Start-Sleep -Milliseconds 100
+            [System.Windows.Forms.Application]::DoEvents()
         }
-        catch {
-            Write-LogMessage "Error during sync: $($_.Exception.Message)" -IsError
-            $progressBar.Visible = $false
+
+        # Process final job output
+        $finalOutput = Receive-Job -Job $job
+        if ($finalOutput) {
+            foreach ($line in $finalOutput) {
+                if ($line.StartsWith('###PROGRESS###:')) {
+                    $progress = [int]($line.Split(':')[1])
+                    Write-LogMessage "Final sync progress" -ProgressValue $progress
+                }
+                elseif ($line.StartsWith('###STATUS###:')) {
+                    $status = $line.Split(':')[1]
+                    Write-LogMessage $status
+                }
+                elseif ($line.StartsWith('###COMPLETE###:')) {
+                    $folder = $line.Split(':')[1]
+                    Write-LogMessage "Completed syncing folder: $folder"
+                }
+                elseif ($line.StartsWith('###ERROR###:')) {
+                    Write-LogMessage $line.Split(':')[1] -IsError
+                }
+            }
         }
-    })
+        Remove-Job -Job $job
+
+        Write-LogMessage "Sync operation completed." -ProgressValue 100
+    } catch {
+        Write-LogMessage "Error during sync: $($_.Exception.Message)" -IsError
+        $progressBar.Visible = $false
+        if ($job) {
+            Stop-Job -Job $job -ErrorAction SilentlyContinue
+            Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
+        }
+        Get-PSSession | Where-Object { $_.State -eq 'Broken' } | Remove-PSSession
+    }
+})
 
 # Create temp directory if it doesn't exist
 $tempPath = Join-Path $PSScriptRoot "temp"
