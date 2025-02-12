@@ -434,7 +434,11 @@ $syncButton.Add_Click({
             foreach ($line in $jobOutput) {
                 if ($line.StartsWith('###PROGRESS###:')) {
                     $progress = [int]($line.Split(':')[1])
-                    Write-LogMessage "Sync progress" -ProgressValue $progress
+                    # Only update progress bar without the "Sync progress" message
+                    $progressBar.Value = $progress
+                    $progressLabel.Text = "$progress%"
+                    $progressLabel.Visible = $true
+                    [System.Windows.Forms.Application]::DoEvents()
                 }
                 elseif ($line.StartsWith('###STATUS###:')) {
                     $status = $line.Split(':')[1]
