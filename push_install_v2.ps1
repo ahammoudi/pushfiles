@@ -176,11 +176,30 @@ $browseButton.Add_Click({
 $outputBox = New-Object System.Windows.Forms.RichTextBox
 $outputBox.Location = New-Object System.Drawing.Point(10, 110)
 $outputBox.Width = 760
-$outputBox.Height = 380
+$outputBox.Height = 370
 $outputBox.Multiline = $true
 $outputBox.ScrollBars = "Vertical"
 $outputBox.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right
 $form.Controls.Add($outputBox)
+
+# Add signature label
+$signatureLabel = New-Object System.Windows.Forms.Label
+$signatureLabel.Text = "Created by Ayad"
+$signatureLabel.Font = New-Object System.Drawing.Font("Arial", 8, [System.Drawing.FontStyle]::Italic)
+$signatureLabel.ForeColor = [System.Drawing.Color]::Gray
+$signatureLabel.AutoSize = $true
+$signatureLabel.Anchor = [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Right
+$signatureLabel.TextAlign = [System.Drawing.ContentAlignment]::MiddleRight
+$signatureLabel.Padding = New-Object System.Windows.Forms.Padding(0, 0, 10, 5)
+
+# Calculate initial position
+$signatureLabel.Location = New-Object System.Drawing.Point(
+    ($form.ClientSize.Width - $signatureLabel.Width - 10),
+    ($form.ClientSize.Height - $signatureLabel.Height - 20)
+)
+
+# Add the label to form controls
+$form.Controls.Add($signatureLabel)
 
 # Push ZIP button
 $pushZipButton = New-Object System.Windows.Forms.Button
@@ -211,7 +230,15 @@ function Set-ButtonsAlignment {
 }
 
 # Add resize event handler
-$form.Add_Resize({ Set-ButtonsAlignment })
+$form.Add_Resize({ 
+    Set-ButtonsAlignment
+    # Recalculate signature position on resize
+    $signatureLabel.Location = New-Object System.Drawing.Point(
+        ($form.ClientSize.Width - $signatureLabel.Width - 10),
+        ($form.ClientSize.Height - $signatureLabel.Height - 20)
+    )
+    $form.Refresh()
+})
 
 # Variable to store credentials
 $global:cred = $null
@@ -397,7 +424,6 @@ $syncButton.Add_Click({
                         
                         if (-not (Test-Path $localFilePath)) {
                             $shouldCopy = $true
-                            Write-Output "###STATUS###:New file found: $relativePath"
                         } else {
                             $localFile = Get-Item $localFilePath
                             if ($remoteFile.LastWriteTime -gt $localFile.LastWriteTime) {
@@ -434,7 +460,7 @@ $syncButton.Add_Click({
             foreach ($line in $jobOutput) {
                 if ($line.StartsWith('###PROGRESS###:')) {
                     $progress = [int]($line.Split(':')[1])
-                    # Only update progress bar without the "Sync progress" message
+                    # Silently update progress bar
                     $progressBar.Value = $progress
                     $progressLabel.Text = "$progress%"
                     $progressLabel.Visible = $true
@@ -456,15 +482,11 @@ $syncButton.Add_Click({
             [System.Windows.Forms.Application]::DoEvents()
         }
 
-        # Process final job output
+        # Process final job output - simplified
         $finalOutput = Receive-Job -Job $job
         if ($finalOutput) {
             foreach ($line in $finalOutput) {
-                if ($line.StartsWith('###PROGRESS###:')) {
-                    $progress = [int]($line.Split(':')[1])
-                    Write-LogMessage "Final sync progress" -ProgressValue $progress
-                }
-                elseif ($line.StartsWith('###STATUS###:')) {
+                if ($line.StartsWith('###STATUS###:')) {
                     $status = $line.Split(':')[1]
                     Write-LogMessage $status
                 }
