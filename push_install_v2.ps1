@@ -316,14 +316,14 @@ $syncButton.Add_Click({
         return
     }
 
-    $cred = Get-GlobalCredential
-    
-    # Get remote server path from config
-    $remotePath = $config.RemoteServer
+    # Define remote path here
+    $remotePath = "C:\Releases"  # Path on remote server
     if (-not $remotePath) {
-        Write-LogMessage "Remote server path not configured in config.json" -IsError
+        Write-LogMessage "Remote server path is not defined" -IsError
         return
     }
+
+    $cred = Get-GlobalCredential
 
     # Create local releases directory if it doesn't exist
     $localPath = Join-Path $PSScriptRoot "releases"
@@ -333,24 +333,18 @@ $syncButton.Add_Click({
 
     try {
         Write-LogMessage "Starting sync from $remotePath..." -ProgressValue 0
-
+        
         $job = Start-Job -ScriptBlock {
             param ($remotePath, $localPath, [PSCredential]$cred)
             
             try {
-                # Better UNC path handling
-                $remoteServer = if ($remotePath -match '\\\\([^\\]+)') {
-                    $matches[1]
-                } else {
-                    throw "Invalid remote path format. Expected UNC path."
-                }
-                $session = New-PSSession -ComputerName $remoteServer -Credential $cred
-                
+                # Create session with the remote server
+                $session = New-PSSession -ComputerName $TestServer -Credential $cred
                 if (-not $session) {
                     throw "Failed to create session"
                 }
 
-                # Get all folders using the session
+                # Get remote folders using session
                 $remoteFolders = Invoke-Command -Session $session -ScriptBlock {
                     param($path)
                     Get-ChildItem -Path $path -Directory
