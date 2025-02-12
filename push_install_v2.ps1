@@ -495,10 +495,11 @@ $pushZipButton.Add_Click({
             } -ArgumentList $zipFilePath, $server, $cred
         }
         
-        # Update the monitoring loop to include more detailed progress
         $totalJobs = $jobs.Count
         $lastProgress = 25
-        while ($jobs | Where-Object { $_.State -eq 'Running' }) {
+        $processedJobs = @()
+        
+        while ($jobs | Where-Object { $_.State -eq 'Running' -or $_.State -eq 'Completed' }) {
             $completed = ($jobs | Where-Object { $_.State -eq 'Completed' }).Count
             $progress = 25 + [math]::Floor(($completed / $totalJobs) * 75)
             
@@ -507,8 +508,8 @@ $pushZipButton.Add_Click({
                 $lastProgress = $progress
             }
         
-            # Process completed jobs
-            foreach ($job in ($jobs | Where-Object { $_.State -eq 'Completed' })) {
+            # Process newly completed jobs
+            foreach ($job in ($jobs | Where-Object { $_.State -eq 'Completed' -and $_ -notin $processedJobs })) {
                 $output = Receive-Job -Job $job
                 foreach ($line in $output) {
                     if ($line.StartsWith('###SUCCESS###:')) {
@@ -522,37 +523,13 @@ $pushZipButton.Add_Click({
                         Write-LogMessage $status
                     }
                 }
-                Remove-Job -Job $job
-            }
-            [System.Windows.Forms.Application]::DoEvents()
-            Start-Sleep -Milliseconds 500
-        }
-        # Monitor all jobs simultaneously
-        $totalJobs = $jobs.Count
-        while ($jobs | Where-Object { $_.State -eq 'Running' }) {
-            $completed = ($jobs | Where-Object { $_.State -eq 'Completed' }).Count
-            $progress = 25 + [math]::Floor(($completed / $totalJobs) * 75)
-            
-            Write-LogMessage "Copying to servers... ($completed/$totalJobs complete)" -ProgressValue $progress
-
-            # Process completed jobs
-            foreach ($job in ($jobs | Where-Object { $_.State -eq 'Completed' })) {
-                $output = Receive-Job -Job $job
-                foreach ($line in $output) {
-                    if ($line.StartsWith('###SUCCESS###:')) {
-                        $server = $line.Split(':')[1]
-                        Write-LogMessage "Push completed: $server"
-                    } elseif ($line.StartsWith('###ERROR###:')) {
-                        $parts = $line.Split(':')
-                        Write-LogMessage "Push failed: $($parts[1]) - $($parts[2])" -IsError
-                    }
-                }
+                $processedJobs += $job
                 Remove-Job -Job $job
             }
             [System.Windows.Forms.Application]::DoEvents()
             Start-Sleep -Milliseconds 100
         }
-
+        
         Write-LogMessage "Push operation completed." -ProgressValue 100
         Remove-Item -Path $zipFilePath -Force
 
