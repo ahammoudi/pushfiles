@@ -106,8 +106,8 @@ $form.Controls.Add($statusStrip)
 # Update progress bar properties
 $progressBar = New-Object System.Windows.Forms.ProgressBar
 $progressBar.Location = New-Object System.Drawing.Point(10, 85)
-$progressBar.Width = [int]$form.ClientSize.Width - 20  # Cast to int and adjust margins
-$progressBar.Height = 20
+$progressBar.Width = [int]$form.ClientSize.Width - 20
+$progressBar.Height = 25  # Increased height to accommodate text
 $progressBar.Style = 'Continuous'
 $progressBar.Visible = $false
 $progressBar.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor 
@@ -117,18 +117,23 @@ $form.Controls.Add($progressBar)
 
 # Progress label with proper integer casting
 $progressLabel = New-Object System.Windows.Forms.Label
-$progressLabel.Location = New-Object System.Drawing.Point(
-    ([int]$form.ClientSize.Width - [int]180),  # Explicit casting to int
-    65
-)
 $progressLabel.Width = 150
 $progressLabel.Height = 20
 $progressLabel.Text = "0%"
-$progressLabel.TextAlign = [System.Drawing.ContentAlignment]::MiddleRight
+$progressLabel.TextAlign = [System.Drawing.ContentAlignment]::MiddleCenter
+$progressLabel.BackColor = [System.Drawing.Color]::Transparent
+$progressLabel.ForeColor = [System.Drawing.Color]::Black
 $progressLabel.Visible = $false
-$progressLabel.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor 
-                       [System.Windows.Forms.AnchorStyles]::Right
+$progressLabel.BringToFront()  # Make sure label is on top
+$progressLabel.Location = New-Object System.Drawing.Point(
+    ([int]$progressBar.Location.X + ([int]$progressBar.Width - [int]$progressLabel.Width) / 2),
+    ([int]$progressBar.Location.Y + ([int]$progressBar.Height - [int]$progressLabel.Height) / 2)
+)
 $form.Controls.Add($progressLabel)
+
+# Make sure to call BringToFront() after adding both controls
+$progressBar.SendToBack()  # Send progress bar to back
+$progressLabel.BringToFront()  # Bring label to front
 
 # Drop-down list (ComboBox) for server list files
 $dropdown = New-Object System.Windows.Forms.ComboBox
@@ -252,7 +257,11 @@ function Set-ButtonsAlignment {
 # Add resize event handler
 $form.Add_Resize({ 
     Set-ButtonsAlignment
-    # Recalculate signature position on resize
+    # Recenter progress label on progress bar
+    $progressLabel.Location = New-Object System.Drawing.Point(
+        ([int]$progressBar.Location.X + ([int]$progressBar.Width - [int]$progressLabel.Width) / 2),
+        ([int]$progressBar.Location.Y + ([int]$progressBar.Height - [int]$progressLabel.Height) / 2)
+    )
     $signatureLabel.Location = New-Object System.Drawing.Point(
         ($form.ClientSize.Width - $signatureLabel.Width - 10),
         ($form.ClientSize.Height - $signatureLabel.Height - 20)
