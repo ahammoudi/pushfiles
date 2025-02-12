@@ -267,15 +267,21 @@ function Write-LogMessage {
     )
     
     $Timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    
+    # Add spacing for new tasks
+    if ($Message -match "^(Starting|Completed|Push completed|Installation completed)") {
+        $LogEntry = "`n[$Timestamp] ----------------------------------------`n[$Timestamp] INFO: $Message"
+    } else {
+        $LogEntry = "[$Timestamp] INFO: $Message"
+    }
+    
     if ($IsError) {
         $LogEntry = "[$Timestamp] ERROR: $Message"
         Write-Error $LogEntry
         $outputBox.SelectionColor = [System.Drawing.Color]::Red
         $statusLabel.Text = "Error: $Message"
         $statusLabel.ForeColor = [System.Drawing.Color]::Red
-    }
-    else {
-        $LogEntry = "[$Timestamp] INFO: $Message"
+    } else {
         Write-Host $LogEntry
         $outputBox.SelectionColor = [System.Drawing.Color]::Black
         $statusLabel.Text = $Message
