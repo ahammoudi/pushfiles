@@ -240,12 +240,22 @@ $backOutButton.Width = 160
 $backOutButton.Height = 40
 $form.Controls.Add($backOutButton)
 
+# Documentation link button
+$docButton = New-Object System.Windows.Forms.LinkLabel
+$docButton.Text = "Documentation"
+$docButton.AutoSize = $true
+$docButton.Font = New-Object System.Drawing.Font("Arial", 9)
+$docButton.LinkBehavior = [System.Windows.Forms.LinkBehavior]::HoverUnderline
+$docButton.LinkColor = [System.Drawing.Color]::Blue
+$docButton.ActiveLinkColor = [System.Drawing.Color]::DarkBlue
+$form.Controls.Add($docButton)
+
 # Function to center buttons
 function Set-ButtonsAlignment {
     $formWidth = [int]$form.ClientSize.Width
     $buttonWidth = [int]$pushZipButton.Width
     $spacing = [int]20
-    $totalWidth = [int](($buttonWidth * 4) + ($spacing * 3))  # Updated for 4 buttons
+    $totalWidth = [int](($buttonWidth * 4) + ($spacing * 3))
     $startX = [int](($formWidth - $totalWidth) / 2)
     $y = [int]($outputBox.Location.Y + $outputBox.Height + 10)
 
@@ -253,6 +263,12 @@ function Set-ButtonsAlignment {
     $installMsiButton.Location = New-Object System.Drawing.Point(($startX + $buttonWidth + $spacing), $y)
     $backOutButton.Location = New-Object System.Drawing.Point(($startX + ($buttonWidth + $spacing) * 2), $y)
     $syncButton.Location = New-Object System.Drawing.Point(($startX + ($buttonWidth + $spacing) * 3), $y)
+
+    # Position doc button below other buttons
+    $docButton.Location = New-Object System.Drawing.Point(
+        [int](($formWidth - $docButton.Width) / 2),
+        [int]($y + $pushZipButton.Height + 10)
+    )
 }
 
 # Add resize event handler
@@ -366,6 +382,15 @@ function Write-LogMessage {
     $outputBox.ScrollToCaret()
 }
 
+# click event for documentation
+$docButton.Add_Click({
+    $docPath = Join-Path $PSScriptRoot "docs\index.html"
+    if (Test-Path $docPath) {
+        Start-Process $docPath
+    } else {
+        Write-LogMessage "Documentation file not found at: $docPath" -IsError
+    }
+})
 
 $syncButton.Add_Click({
         $selectedItem = $dropdown.SelectedItem
