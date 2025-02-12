@@ -99,6 +99,7 @@ $form.Add_FormClosing({
 
 # Add status strip
 $statusStrip = New-Object System.Windows.Forms.StatusStrip
+$statusStrip.Visible = $false  # Hide the status strip
 $statusLabel = New-Object System.Windows.Forms.ToolStripStatusLabel
 $statusStrip.Items.Add($statusLabel)
 $form.Controls.Add($statusStrip)
