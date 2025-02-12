@@ -475,32 +475,41 @@ $pushZipButton.Add_Click({
                     try {
                         Write-Output "###STATUS###:Starting copy to $server"
                         $destinationPath = "\\${server}\C$\temp"
-                    
-                        # Test path accessibility
-                        if (-not (Test-Path -Path $destinationPath -Credential $cred)) {
-                            Write-Output "###STATUS###:Creating temp directory on $server"
-                            New-Item -Path $destinationPath -ItemType Directory -Credential $cred -Force
+                        
+                        # Check if this is the local machine
+                        if ($server -eq $env:COMPUTERNAME -or $server -eq "localhost" -or $server -eq ".") {
+                            # Local copy
+                            if (-not (Test-Path "C:\temp")) {
+                                New-Item -Path "C:\temp" -ItemType Directory -Force | Out-Null
+                            }
+                            Copy-Item -Path $zipFilePath -Destination "C:\temp" -Force
+                            
+                            # Verify local copy
+                            $destFile = Join-Path "C:\temp" (Split-Path $zipFilePath -Leaf)
+                            if (Test-Path -Path $destFile) {
+                                Write-Output "###SUCCESS###:$server"
+                            } else {
+                                throw "Local file copy failed"
+                            }
+                        } else {
+                            # Remote copy - use existing code
+                            if (-not (Test-Path -Path $destinationPath -Credential $cred)) {
+                                Write-Output "###STATUS###:Creating temp directory on $server"
+                                New-Item -Path $destinationPath -ItemType Directory -Credential $cred -Force
+                            }
+                            
+                            Copy-Item -Path $zipFilePath -Destination $destinationPath -Credential $cred -Force
+                            
+                            # Verify remote copy
+                            $destFile = Join-Path $destinationPath (Split-Path $zipFilePath -Leaf)
+                            if (Test-Path -Path $destFile -Credential $cred) {
+                                Write-Output "###SUCCESS###:$server"
+                            } else {
+                                throw "Remote file copy failed"
+                            }
                         }
-                    
-                        # Verify source file exists
-                        if (-not (Test-Path -Path $zipFilePath)) {
-                            throw "Source file not found: $zipFilePath"
-                        }
-                    
-                        Write-Output "###STATUS###:Copying file to $server"
-                        Copy-Item -Path $zipFilePath -Destination $destinationPath -Credential $cred -Force
-                    
-                        # Verify copy succeeded
-                        $destFile = Join-Path $destinationPath (Split-Path $zipFilePath -Leaf)
-                        if (Test-Path -Path $destFile -Credential $cred) {
-                            Write-Output "###SUCCESS###:$server"
-                        }
-                        else {
-                            throw "File copy succeeded but destination file not found"
-                        }
-                    }
-                    catch {
-                        Write-Output "###ERROR###:$server:$($_.Exception.Message)"
+                    } catch {
+                        Write-Output "###ERROR###:${server}:$($_.Exception.Message)"
                     }
                 } -ArgumentList $zipFilePath, $server, $cred
             }
