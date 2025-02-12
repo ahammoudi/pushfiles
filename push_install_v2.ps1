@@ -350,19 +350,17 @@ $syncButton.Add_Click({
                     Get-ChildItem -Path $path -Directory
                 } -ArgumentList $remotePath
 
-                $totalItems = $remoteFolders.Count
-                $current = 0
+                $totalFolders = $remoteFolders.Count
+                $currentFolder = 0
+                $totalProgress = 0
 
                 foreach ($folder in $remoteFolders) {
-                    $current++
-                    $percentComplete = if ($totalItems -gt 0) {
-                        [math]::Floor(($current / $totalItems) * 100)
-                    } else {
-                        0
-                    }
+                    $currentFolder++
                     
-                    Write-Output "###PROGRESS###:$percentComplete"
-                    Write-Output "###STATUS###:Processing folder ($current/$totalItems): $($folder.Name)"
+                    # Calculate base progress for folder (0-50%)
+                    $folderProgress = [math]::Floor(($currentFolder / $totalFolders) * 50)
+                    Write-Output "###PROGRESS###:$folderProgress"
+                    Write-Output "###STATUS###:Processing folder ($currentFolder/$totalFolders): $($folder.Name)"
                     
                     $targetPath = Join-Path $localPath $folder.Name
                     
@@ -382,7 +380,16 @@ $syncButton.Add_Click({
                         }
                     } -ArgumentList (Join-Path $remotePath $folder.Name)
 
+                    # Get total files for this folder
+                    $totalFiles = ($remoteFiles | Measure-Object).Count
+                    $currentFile = 0
+                    
                     foreach ($remoteFile in $remoteFiles) {
+                        $currentFile++
+                        # Calculate file progress (50-100%)
+                        $fileProgress = 50 + [math]::Floor(($currentFile / $totalFiles) * 50)
+                        Write-Output "###PROGRESS###:$fileProgress"
+                        
                         $relativePath = $remoteFile.FullName.Substring($remotePath.Length + 1)
                         $localFilePath = Join-Path $localPath $relativePath
                         
