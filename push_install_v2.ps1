@@ -737,10 +737,12 @@ $installMsiButton.Add_Click({
         $progressBar.Value = 0
         $progressLabel.Text = "0%"
         
-        Write-LogMessage "Starting parallel installation..." -ProgressValue 0
+        Write-LogMessage "Starting installation process..." -ProgressValue 0
 
         $serverListFile = ".\config\$selectedItem.txt"
         $servers = Get-Content $serverListFile | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+
+        Write-LogMessage "Preparing for parallel installation..." -ProgressValue 10
 
         # Create all installation jobs simultaneously
         $jobs = foreach ($server in $servers) {
@@ -788,14 +790,16 @@ $installMsiButton.Add_Click({
             } -ArgumentList $server, $cred, $global:currentZipFileName, $YourAppPoolName, $YourServiceName
         }
 
+        Write-LogMessage "Starting parallel installation on servers..." -ProgressValue 20
+        
         $totalJobs = $jobs.Count
-        $lastProgress = 0
+        $lastProgress = 20
         $processedJobs = @()
 
         # Monitor jobs until all are complete
         while ($jobs | Where-Object { $_.State -eq 'Running' -or ($_.State -eq 'Completed' -and $_ -notin $processedJobs) }) {
             $completed = ($jobs | Where-Object { $_.State -eq 'Completed' }).Count
-            $progress = [math]::Floor(($completed / $totalJobs) * 100)
+            $progress = 20 + [math]::Floor(($completed / $totalJobs) * 80)
 
             if ($progress -ne $lastProgress) {
                 Write-LogMessage "Installing on servers... ($completed/$totalJobs complete)" -ProgressValue $progress
@@ -824,6 +828,12 @@ $installMsiButton.Add_Click({
             }
             [System.Windows.Forms.Application]::DoEvents()
             Start-Sleep -Milliseconds 100
+        }
+
+        # Final check for any remaining jobs
+        foreach ($job in ($jobs | Where-Object { $_.State -eq 'Completed' -and $_ -notin $processedJobs })) {
+            Receive-Job -Job $job | Out-Null
+            Remove-Job -Job $job
         }
 
         Write-LogMessage "Installation completed on all servers." -ProgressValue 100
