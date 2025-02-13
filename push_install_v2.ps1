@@ -3,7 +3,7 @@ Add-Type -AssemblyName PresentationFramework
 
 # Load configuration
 try {
-    $config = Get-Content -Path ".\config\config.json" | ConvertFrom-Json
+    $config = Get-Content -Path "$PSScriptRoot\config\config.json" | ConvertFrom-Json
     
     $LogFile = $config.LogFile
     $InstallerName = $config.InstallerName
@@ -96,13 +96,6 @@ $form.Add_FormClosing({
         if ($global:cred) { $global:cred = $null }
         Get-Job | Remove-Job -Force -ErrorAction SilentlyContinue
     })
-
-# Add status strip
-$statusStrip = New-Object System.Windows.Forms.StatusStrip
-$statusStrip.Visible = $false  # Hide the status strip
-$statusLabel = New-Object System.Windows.Forms.ToolStripStatusLabel
-$statusStrip.Items.Add($statusLabel)
-$form.Controls.Add($statusStrip)
 
 # Update progress bar properties
 $progressBar = New-Object System.Windows.Forms.ProgressBar
@@ -354,14 +347,10 @@ function Write-LogMessage {
         $LogEntry = "[$Timestamp] ERROR: $Message"
         Write-Error $LogEntry
         $outputBox.SelectionColor = [System.Drawing.Color]::Red
-        $statusLabel.Text = "Error: $Message"
-        $statusLabel.ForeColor = [System.Drawing.Color]::Red
     }
     else {
         Write-Host $LogEntry
         $outputBox.SelectionColor = [System.Drawing.Color]::Black
-        $statusLabel.Text = $Message
-        $statusLabel.ForeColor = [System.Drawing.Color]::Black
     }
 
     if ($ProgressValue -ge 0) {
@@ -728,103 +717,126 @@ $pushZipButton.Add_Click({
         }
     })
 
-# Install MSI button click event
+# Update Install MSI button click event
 $installMsiButton.Add_Click({
-        if (-not $global:currentZipFileName) {
-            Write-LogMessage "Please push a ZIP file first." -IsError
-            return
-        }
+    if (-not $global:currentZipFileName) {
+        Write-LogMessage "Please push a ZIP file first." -IsError
+        return
+    }
 
-        $selectedItem = $dropdown.SelectedItem
-        if ($selectedItem -eq "Select Server List" -or -not $selectedItem) {
-            Write-LogMessage "Please select a server list." -IsError
-            return
-        }
+    $selectedItem = $dropdown.SelectedItem
+    if ($selectedItem -eq "Select Server List" -or -not $selectedItem) {
+        Write-LogMessage "Please select a server list." -IsError
+        return
+    }
 
-        $cred = Get-GlobalCredential
+    $cred = Get-GlobalCredential
 
-        try {
-            $serverListFile = ".\config\$selectedItem.txt"
-            $servers = Get-Content $serverListFile
-            $totalServers = ($servers | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }).Count
-            $currentServer = 0
+    try {
+        # Clear previous progress
+        $progressBar.Value = 0
+        $progressLabel.Text = "0%"
+        
+        Write-LogMessage "Starting parallel installation..." -ProgressValue 0
 
-            foreach ($server in $servers) {
-                if (-not [string]::IsNullOrWhiteSpace($server)) {
-                    $currentServer++
-                    Update-Progress -Current $currentServer -Total $totalServers -Operation "Installing MSI on servers"
+        $serverListFile = ".\config\$selectedItem.txt"
+        $servers = Get-Content $serverListFile | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
 
-                    try {
-                        $job = Start-Job -ScriptBlock {
-                            param ($server, [PSCredential]$cred, $zipFileName)
-                            $session = New-PSSession -ComputerName $server -Credential $cred
-                            Invoke-Command -Session $session -ScriptBlock {
-                                param ($zipFileName)
-                                Write-Host "###PROGRESS###:Preparing installation on $env:COMPUTERNAME"
-                                $zipPath = "C:\temp\$zipFileName"
-                                $extractPath = "C:\temp\extracted"
-    
-                                Write-Host "###PROGRESS###:Extracting ZIP file"
-                                Add-Type -AssemblyName System.IO.Compression.FileSystem
-                                [System.IO.Compression.ZipFile]::ExtractToDirectory($zipPath, $extractPath)
-                                $exeFile = Get-ChildItem -Path $extractPath -Filter "*.exe" -Recurse | Select-Object -First 1
-                                if ($exeFile) {
-                                    Write-Host "###PROGRESS###:Found executable: $($exeFile.Name)"
-                                    try {
-                                        Write-Host "###PROGRESS###:Starting installation"
-                                        $process = Start-Process -FilePath $exeFile.FullName -ArgumentList "install" -Wait -NoNewWindow -PassThru
-
-                                        if ($process.ExitCode -eq 0) {
-                                            Write-Host "###PROGRESS###:Installation completed successfully (Exit Code: 0)"
-                                        }
-                                        else {
-                                            throw "Installation failed with exit code: $($process.ExitCode)"
-                                        }
-                                        Write-Host "###PROGRESS###:Restarting services"
-                                        Restart-Service -Name 'W3SVC'
-                                        Import-Module WebAdministration
-                                        Restart-WebAppPool -Name $using:YourAppPoolName
-                                        Restart-Service -Name $using:YourServiceName
-                                        Write-Host "###PROGRESS###:Services restarted successfully"
-                                    }
-                                    catch {
-                                        throw "Installation failed: $_"
-                                    }
-                                }
-                                else {
-                                    throw "No EXE file found in extracted contents"
-                                }
-                            } -ArgumentList $zipFileName
-                            Remove-PSSession -Session $session
-                        } -ArgumentList $server, $cred, $global:currentZipFileName
-
-                        $job | Wait-Job
-                        $jobOutput = Receive-Job -Job $job
+        # Create all installation jobs simultaneously
+        $jobs = foreach ($server in $servers) {
+            Start-Job -ScriptBlock {
+                param ($server, [PSCredential]$cred, $zipFileName, $YourAppPoolName, $YourServiceName)
+                try {
+                    Write-Output "###STATUS###:Starting installation on $server"
+                    $session = New-PSSession -ComputerName $server -Credential $cred
+                    
+                    Invoke-Command -Session $session -ScriptBlock {
+                        param ($zipFileName, $YourAppPoolName, $YourServiceName)
                         
-                        foreach ($line in $jobOutput) {
-                            if ($line.StartsWith('###PROGRESS###:')) {
-                                $status = $line.Split(':')[1]
-                                Write-LogMessage $status -ProgressValue ([math]::Floor(($currentServer / $totalServers) * 100))
-                                [System.Windows.Forms.Application]::DoEvents()
+                        $zipPath = "C:\temp\$zipFileName"
+                        $extractPath = "C:\temp\extracted"
+
+                        Add-Type -AssemblyName System.IO.Compression.FileSystem
+                        [System.IO.Compression.ZipFile]::ExtractToDirectory($zipPath, $extractPath)
+                        
+                        $exeFile = Get-ChildItem -Path $extractPath -Filter "*.exe" -Recurse | Select-Object -First 1
+                        if ($exeFile) {
+                            $process = Start-Process -FilePath $exeFile.FullName -ArgumentList "install" -Wait -NoNewWindow -PassThru
+
+                            if ($process.ExitCode -eq 0) {
+                                Write-Output "###STATUS###:Restarting services on $env:COMPUTERNAME"
+                                Restart-Service -Name 'W3SVC'
+                                Import-Module WebAdministration
+                                Restart-WebAppPool -Name $YourAppPoolName
+                                Restart-Service -Name $YourServiceName
+                                Write-Output "###SUCCESS###:$env:COMPUTERNAME"
                             }
                             else {
-                                $outputBox.AppendText($line + [Environment]::NewLine)
+                                throw "Installation failed with exit code: $($process.ExitCode)"
                             }
                         }
-                    }
-                    catch {
-                        Write-LogMessage "Error executing commands on ${server}: $($_.Exception.Message)" -IsError
-                    }
+                        else {
+                            throw "No EXE file found in extracted contents"
+                        }
+                    } -ArgumentList $zipFileName, $YourAppPoolName, $YourServiceName
+
+                    Remove-PSSession -Session $session
                 }
+                catch {
+                    Write-Output "###ERROR###:${server}:$($_.Exception.Message)"
+                }
+            } -ArgumentList $server, $cred, $global:currentZipFileName, $YourAppPoolName, $YourServiceName
+        }
+
+        $totalJobs = $jobs.Count
+        $lastProgress = 0
+        $processedJobs = @()
+
+        # Monitor jobs until all are complete
+        while ($jobs | Where-Object { $_.State -eq 'Running' -or ($_.State -eq 'Completed' -and $_ -notin $processedJobs) }) {
+            $completed = ($jobs | Where-Object { $_.State -eq 'Completed' }).Count
+            $progress = [math]::Floor(($completed / $totalJobs) * 100)
+
+            if ($progress -ne $lastProgress) {
+                Write-LogMessage "Installing on servers... ($completed/$totalJobs complete)" -ProgressValue $progress
+                $lastProgress = $progress
             }
 
-            Write-LogMessage "Installation completed." -ProgressValue 100
+            # Process completed jobs
+            foreach ($job in ($jobs | Where-Object { $_.State -eq 'Completed' -and $_ -notin $processedJobs })) {
+                $output = Receive-Job -Job $job
+                foreach ($line in $output) {
+                    if ($line.StartsWith('###SUCCESS###:')) {
+                        $server = $line.Split(':')[1]
+                        Write-LogMessage "Installation completed: $server"
+                    }
+                    elseif ($line.StartsWith('###ERROR###:')) {
+                        $parts = $line.Split(':')
+                        Write-LogMessage "Installation failed: $($parts[1]) - $($parts[2])" -IsError
+                    }
+                    elseif ($line.StartsWith('###STATUS###:')) {
+                        $status = $line.Split(':')[1]
+                        Write-LogMessage $status
+                    }
+                }
+                $processedJobs += $job
+                Remove-Job -Job $job
+            }
+            [System.Windows.Forms.Application]::DoEvents()
+            Start-Sleep -Milliseconds 100
         }
-        catch {
-            Write-LogMessage "Error reading server list file '$serverListFile': $($_.Exception.Message)" -IsError
-            $progressBar.Visible = $false
-        }
-    })
+
+        Write-LogMessage "Installation completed on all servers." -ProgressValue 100
+    }
+    catch {
+        Write-LogMessage "Error during installation: $($_.Exception.Message)" -IsError
+        $progressBar.Visible = $false
+    }
+    finally {
+        # Cleanup any remaining jobs
+        $jobs | Where-Object { $_ } | Remove-Job -Force -ErrorAction SilentlyContinue
+    }
+})
 
 # Add Back Out button click event
 $backOutButton.Add_Click({
