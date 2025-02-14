@@ -1,3 +1,65 @@
+<#
+.SYNOPSIS
+    Deployment Tool for pushing and installing MSI packages on remote servers.
+
+.DESCRIPTION
+    This script provides a graphical user interface (GUI) for deploying MSI packages to remote servers.
+    It includes functionalities for selecting server lists, pushing ZIP files, installing MSI packages,
+    and backing out installations. The script also handles logging, progress updates, and error handling.
+
+.PARAMETER LogFile
+    The path to the log file where log messages will be written.
+
+.PARAMETER InstallerName
+    The name of the installer to be used for installation.
+
+.PARAMETER YourAppPoolName
+    The name of the application pool to be restarted after installation.
+
+.PARAMETER YourServiceName
+    The name of the service to be restarted after installation.
+
+.FUNCTION Move-Logs
+    Rotates the log file if it exceeds a specified size and maintains a specified number of log files.
+
+.FUNCTION Remove-TempFiles
+    Cleans up temporary files on remote servers.
+
+.FUNCTION Update-Progress
+    Updates the progress bar and log messages with the current progress of an operation.
+
+.FUNCTION Get-GlobalCredential
+    Prompts the user for credentials and validates them against a test server.
+
+.FUNCTION Test-Credential
+    Tests the provided credentials against a specified server.
+
+.FUNCTION Write-LogMessage
+    Writes log messages to the log file and the output box in the GUI.
+
+.FUNCTION Set-ButtonsAlignment
+    Centers the buttons on the form and adjusts their positions when the form is resized.
+
+.FUNCTION Get-GlobalCredential
+    Prompts the user for credentials and validates them against a test server.
+
+.FUNCTION Test-Credential
+    Tests the provided credentials against a specified server.
+
+.FUNCTION Write-LogMessage
+    Writes log messages to the log file and the output box in the GUI.
+
+.FUNCTION Set-ButtonsAlignment
+    Centers the buttons on the form and adjusts their positions when the form is resized.
+
+.NOTES
+    Created by Ayad.
+
+.EXAMPLE
+    To run the script, simply execute it in PowerShell:
+    .\push_install_v2.ps1
+
+#>
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName PresentationFramework
 
@@ -97,6 +159,11 @@ $form.Add_FormClosing({
         Get-Job | Remove-Job -Force -ErrorAction SilentlyContinue
     })
 
+$statusStrip = New-Object System.Windows.Forms.StatusStrip
+$statusLabel = New-Object System.Windows.Forms.ToolStripStatusLabel
+$statusStrip.Items.Add($statusLabel)
+$form.Controls.Add($statusStrip)
+
 # Update progress bar properties
 $progressBar = New-Object System.Windows.Forms.ProgressBar
 $progressBar.Location = New-Object System.Drawing.Point(10, 85)
@@ -123,6 +190,8 @@ $progressLabel.Location = New-Object System.Drawing.Point(
     ([int]$progressBar.Location.X + ([int]$progressBar.Width - [int]$progressLabel.Width) / 2),
     ([int]$progressBar.Location.Y + ([int]$progressBar.Height - [int]$progressLabel.Height) / 2)
 )
+# Make the label transparent
+$progressLabel.Parent = $progressBar
 $form.Controls.Add($progressLabel)
 
 # Make sure to call BringToFront() after adding both controls
@@ -139,7 +208,7 @@ $dropdown.DropDownStyle = [System.Windows.Forms.ComboBoxStyle]::DropDownList
 # Add items to the dropdown (server list files)
 $dropdown.Items.Add("Select Server List") # Default item
 $dropdown.SelectedIndex = 0 # Select the default item initially
-$textFiles = Get-ChildItem -Path . -Filter ".\config\*.txt" # Get all .txt files in the current directory
+$textFiles = Get-ChildItem -Path "$PSScriptRoot\config" -Filter "*.txt" # Get all .txt files in the config directory
 foreach ($file in $textFiles) {
     $dropdown.Items.Add($file.BaseName) # Add the base name (without extension) to the dropdown
 }
@@ -175,7 +244,7 @@ $browseButton.Add_Click({
         $folderDialog.ShowNewFolderButton = $true
     
         # Set initial directory from config
-        if ($config.DefaultBrowsePath -and (Test-Path $config.DefaultBrowsePath)) {
+        if ($config -and $config.DefaultBrowsePath -and (Test-Path $config.DefaultBrowsePath)) {
             $folderDialog.SelectedPath = $config.DefaultBrowsePath
         }
     
@@ -730,6 +799,20 @@ $installMsiButton.Add_Click({
         return
     }
 
+     # Add confirmation dialog
+     $result = [System.Windows.Forms.MessageBox]::Show(
+        "Are you sure you want to install on the selected servers?`n`nServer List: $selectedItem`nPackage: $global:currentZipFileName",
+        "Confirm Installation",
+        [System.Windows.Forms.MessageBoxButtons]::YesNo,
+        [System.Windows.Forms.MessageBoxIcon]::Question,
+        [System.Windows.Forms.MessageBoxDefaultButton]::Button2
+    )
+
+    if ($result -eq [System.Windows.Forms.DialogResult]::No) {
+        Write-LogMessage "Installation cancelled by user."
+        return
+    }
+    
     $cred = Get-GlobalCredential
 
     try {
@@ -860,6 +943,20 @@ $backOutButton.Add_Click({
             Write-LogMessage "Please select a server list." -IsError
             return
         }
+
+        # Add confirmation dialog
+     $result = [System.Windows.Forms.MessageBox]::Show(
+        "Are you sure you want to Backout on the selected servers?`n`nServer List: $selectedItem`nPackage: $global:currentZipFileName",
+        "Confirm Installation",
+        [System.Windows.Forms.MessageBoxButtons]::YesNo,
+        [System.Windows.Forms.MessageBoxIcon]::Question,
+        [System.Windows.Forms.MessageBoxDefaultButton]::Button2
+    )
+
+    if ($result -eq [System.Windows.Forms.DialogResult]::No) {
+        Write-LogMessage "Installation cancelled by user."
+        return
+    }
 
         $cred = Get-GlobalCredential
 
