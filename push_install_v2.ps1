@@ -789,6 +789,9 @@ $pushZipButton.Add_Click({
 
 # Update Install MSI button click event
 $installMsiButton.Add_Click({
+        # Disable the button during installation
+    $installMsiButton.Enabled = $false
+    
         if (-not $global:currentZipFileName) {
             Write-LogMessage "Please push a ZIP file first." -IsError
             return
@@ -847,6 +850,9 @@ $installMsiButton.Add_Click({
                         
                             $exeFile = Get-ChildItem -Path $extractPath -Filter "*.exe" -Recurse | Select-Object -First 1
                             if ($exeFile) {
+                                # Change to the executable's directory before running it
+        $originalLocation = Get-Location
+        Set-Location -Path $exeFile.DirectoryName
                                 $process = Start-Process -FilePath $exeFile.FullName -ArgumentList "install" -Wait -NoNewWindow -PassThru
 
                                 if ($process.ExitCode -eq 0) {
@@ -933,11 +939,15 @@ $installMsiButton.Add_Click({
         }
         catch {
             Write-LogMessage "Error during installation: $($_.Exception.Message)" -IsError
-            $progressBar.Visible = $false
+            $progressBar.Visible = $false 
         }
         finally {
             # Cleanup any remaining jobs
             $jobs | Where-Object { $_ } | Remove-Job -Force -ErrorAction SilentlyContinue
+            Get-PSSession | Remove-PSSession -ErrorAction SilentlyContinue
+            $installMsiButton.Enabled = $true
+            $progressBar.Value = 0
+            $progressLabel.Text = "0%"
         }
     })
 
