@@ -281,6 +281,26 @@ $signatureLabel.Location = New-Object System.Drawing.Point(
 # Add the label to form controls
 $form.Controls.Add($signatureLabel)
 
+# Version label
+$versionLabel = New-Object System.Windows.Forms.Label
+$versionLabel.Text = "Version 1.0.1"  # Update version number as needed
+$versionLabel.Font = New-Object System.Drawing.Font("Arial", 8, [System.Drawing.FontStyle]::Regular)
+$versionLabel.ForeColor = [System.Drawing.Color]::Gray
+$versionLabel.AutoSize = $true
+$versionLabel.Anchor = [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Left
+$versionLabel.TextAlign = [System.Drawing.ContentAlignment]::MiddleLeft
+$versionLabel.Padding = New-Object System.Windows.Forms.Padding(10, 0, 0, 5)
+
+# Calculate initial position (bottom-left)
+$versionLabel.Location = New-Object System.Drawing.Point(
+    10,  # Left margin
+    ($form.ClientSize.Height - $versionLabel.Height - 20)  # Bottom margin
+)
+
+# Add the label to form controls
+$form.Controls.Add($versionLabel)
+
+
 # Push ZIP button
 $pushZipButton = New-Object System.Windows.Forms.Button
 $pushZipButton.Text = "Push ZIP File"
@@ -345,6 +365,7 @@ $form.Add_Resize({
         ($form.ClientSize.Width - $signatureLabel.Width - 10),
         ($form.ClientSize.Height - $signatureLabel.Height - 20)
         )
+        $versionLabel.Location = New-Object System.Drawing.Point(10,($form.ClientSize.Height - $versionLabel.Height - 20))
         $zipFilePathBox.Width = $form.ClientSize.Width - 195
         $form.Refresh()
     })
