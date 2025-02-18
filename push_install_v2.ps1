@@ -462,6 +462,59 @@ function Write-LogMessage {
     $outputBox.ScrollToCaret()
 }
 
+# Update form closing event handler
+$form.Add_FormClosing({
+    param($formSender, $e)
+    
+    # Check if this is a user-initiated close (not a programmatic one)
+    if ($e.CloseReason -eq [System.Windows.Forms.CloseReason]::UserClosing) {
+        $result = [System.Windows.Forms.MessageBox]::Show(
+            "Are you sure you want to exit?",
+            "Confirm Exit",
+            [System.Windows.Forms.MessageBoxButtons]::YesNo,
+            [System.Windows.Forms.MessageBoxIcon]::Question,
+            [System.Windows.Forms.MessageBoxDefaultButton]::Button2
+        )
+
+        if ($result -eq [System.Windows.Forms.DialogResult]::No) {
+            # Cancel the close operation
+            $e.Cancel = $true
+            return
+        }
+    }
+
+    try {
+        # Rotate log file
+        Write-LogMessage "Performing log rotation..."
+        Move-Logs -LogFile $LogFile -MaxSize 10MB -MaxFiles 10
+
+        # Clean up remote servers
+        Write-LogMessage "Cleaning up remote servers..."
+        $serverFiles = Get-ChildItem -Path "$PSScriptRoot\config" -Filter "*.txt"
+        foreach ($file in $serverFiles) {
+            $servers = Get-Content $file.FullPath | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+            foreach ($server in $servers) {
+                try {
+                    Remove-TempFiles -server $server
+                    Write-LogMessage "Cleaned up server: $server"
+                }
+                catch {
+                    Write-LogMessage "Failed to clean up server $server : $($_.Exception.Message)" -IsError
+                }
+            }
+        }
+    }
+    catch {
+        Write-LogMessage "Error during cleanup: $($_.Exception.Message)" -IsError
+    }
+    finally {
+        # Cleanup operations when closing is confirmed
+        if ($global:cred) { $global:cred = $null }
+        Get-Job | Remove-Job -Force -ErrorAction SilentlyContinue
+        Get-PSSession | Remove-PSSession -ErrorAction SilentlyContinue
+    }
+})
+
 # click event for documentation
 $docButton.Add_Click({
         $docPath = Join-Path $PSScriptRoot "docs\index.html"
@@ -1020,13 +1073,13 @@ $installMsiButton.Add_Click({
                             else {
                                 throw "No EXE file found in extracted contents"
                             }
-                        } -ArgumentList $global:currentZipFileName, $AppPoolName, $ServiceName
+                        } -ArgumentList $ZipFileName, $AppPoolName, $AppPoolName2, $AppPoolName3, $ServiceName
                         Remove-PSSession -Session $session
                     }
                     catch {
                         Write-Output "###ERROR###:${server}:$($_.Exception.Message)"
                     }
-                } -ArgumentList $server, $cred, $global:currentZipFileName, $AppPoolName1, $ServiceName
+                } -ArgumentList $server, $cred, $global:currentZipFileName, $AppPoolName, $AppPoolName2, $AppPoolName3, $ServiceName
             }
 
             Write-LogMessage "Starting parallel installation on servers..." -ProgressValue 20
