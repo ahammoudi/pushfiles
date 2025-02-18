@@ -13,10 +13,10 @@
 .PARAMETER InstallerName
     The name of the installer to be used for installation.
 
-.PARAMETER YourAppPoolName
+.PARAMETER AppPoolName
     The name of the application pool to be restarted after installation.
 
-.PARAMETER YourServiceName
+.PARAMETER ServiceName
     The name of the service to be restarted after installation.
 
 .FUNCTION Move-Logs
@@ -69,8 +69,8 @@ try {
     
     $LogFile = $config.LogFile
     $InstallerName = $config.InstallerName
-    $YourAppPoolName = $config.AppPoolName
-    $YourServiceName = $config.ServiceName
+    $AppPoolName = $config.AppPoolName
+    $ServiceName = $config.ServiceName
 
     if (-not (Test-Path $LogFile)) {
         New-Item -ItemType File -Path $LogFile -Force
@@ -855,69 +855,143 @@ $installMsiButton.Add_Click({
             # Create all installation jobs simultaneously
             $jobs = foreach ($server in $servers) {
                 Start-Job -ScriptBlock {
-                    param ($server, [PSCredential]$cred, $zipFileName, $YourAppPoolName, $YourServiceName)
+                    param ($server, [PSCredential]$cred, $zipFileName, $AppPoolName, $ServiceName)
                     try {
                         Write-Output "###STATUS###:Starting installation on $server"
                         $session = New-PSSession -ComputerName $server -Credential $cred
                     
                         Invoke-Command -Session $session -ScriptBlock {
-                            param ($zipFileName, $YourAppPoolName, $YourServiceName)
-                        
+                            param ($zipFileName, $AppPoolName, $ServiceName)
+                            
                             $zipPath = "C:\temp\$zipFileName"
                             $extractPath = "C:\temp\extracted"
-
+                        
                             Add-Type -AssemblyName System.IO.Compression.FileSystem
                             [System.IO.Compression.ZipFile]::ExtractToDirectory($zipPath, $extractPath)
-                        
+                            
                             $exeFile = Get-ChildItem -Path $extractPath -Filter "*.exe" -Recurse | Select-Object -First 1
                             if ($exeFile) {
                                 # Change to the executable's directory before running it
                                 $originalLocation = Get-Location
-                                Set-Location -Path $exeFile.DirectoryName
-                                $process = Start-Process -FilePath $exeFile.FullName -ArgumentList "install" -Wait -NoNewWindow -PassThru
+                                try {
+                                    Set-Location -Path $exeFile.DirectoryName
+                                    $process = Start-Process -FilePath $exeFile.FullName -ArgumentList "install" -Wait -NoNewWindow -PassThru
+                        
+                                    # Service check and restart section in Invoke-Command block
+                                    if ($process.ExitCode -eq 0) {
+                                        Write-Output "###STATUS###:Checking services on $env:COMPUTERNAME"
+    
+                                        # Check initial states and store service objects
+                                        $initialStates = @{
+                                            IIS           = @{
+                                                IsRunning = $false
+                                                Service   = $null
+                                            }
+                                            AppPool       = @{
+                                                IsRunning = $false
+                                                Object    = $null
+                                            }
+                                            CustomService = @{
+                                                IsRunning = $false
+                                                Service   = $null
+                                            }
+                                        }
+    
+                                        # Get service states once
+                                        Import-Module WebAdministration
+                                        $initialStates.IIS.Service = Get-Service -Name 'W3SVC' -ErrorAction SilentlyContinue
+                                        $initialStates.AppPool.Object = Get-Item "IIS:\AppPools\$using:AppPoolName" -ErrorAction SilentlyContinue
+                                        $initialStates.CustomService.Service = Get-Service -Name $using:ServiceName -ErrorAction SilentlyContinue
 
-                                if ($process.ExitCode -eq 0) {
-                                    Write-Output "###STATUS###:Checking and restarting services on $env:COMPUTERNAME"
-                                    
-                                    # Check and restart IIS
-                                    $iisService = Get-Service -Name 'W3SVC'
-                                    if ($iisService.Status -eq 'Running') {
-                                        Write-Output "###STATUS###:Restarting IIS..."
-                                        Restart-Service -Name 'W3SVC' -Force
+                                        # Store initial running states
+                                        if ($initialStates.IIS.Service -and $initialStates.IIS.Service.Status -eq 'Running') {
+                                            $initialStates.IIS.IsRunning = $true
+                                            Write-Output "###STATUS###:Restarting IIS..."
+                                            Restart-Service -Name 'W3SVC' -Force
+                                        }
+                                        else {
+                                            Write-Output "###STATUS###:IIS is already stopped, leaving as is"
+                                        }
+
+                                        if ($initialStates.AppPool.Object -and $initialStates.AppPool.Object.State -eq 'Started') {
+                                            $initialStates.AppPool.IsRunning = $true
+                                            Write-Output "###STATUS###:Restarting Application Pool..."
+                                            Restart-WebAppPool -Name $using:AppPoolName
+                                        }
+                                        else {
+                                            Write-Output "###STATUS###:AppPool is already stopped, leaving as is"
+                                        }
+
+                                        if ($initialStates.CustomService.Service -and $initialStates.CustomService.Service.Status -eq 'Running') {
+                                            $initialStates.CustomService.IsRunning = $true
+                                            Write-Output "###STATUS###:Restarting Custom Service..."
+                                            Restart-Service -Name $using:ServiceName -Force
+                                        }
+                                        else {
+                                            Write-Output "###STATUS###:Custom Service is already stopped, leaving as is"
+                                        }
+
+                                        # Wait for services to stabilize
+                                        Write-Output "###STATUS###:Waiting for services to stabilize..."
+                                        Start-Sleep -Seconds 5
+
+                                        # Verify only services that were running
+                                        Write-Output "###STATUS###:Verifying services status..."
+                                        $success = $true
+
+                                        # Verify each service that was running
+                                        if ($initialStates.IIS.IsRunning) {
+                                            $iisService = Get-Service -Name 'W3SVC' -ErrorAction SilentlyContinue
+                                            Write-Output "###STATUS###:IIS Status: $($iisService.Status)"
+                                            if (-not $iisService -or $iisService.Status -ne 'Running') {
+                                                $success = $false
+                                                Write-Output "###ERROR###:$env:COMPUTERNAME:IIS failed to start"
+                                            }
+                                        }
+
+                                        if ($initialStates.AppPool.IsRunning) {
+                                            $appPool = Get-Item "IIS:\AppPools\$using:AppPoolName" -ErrorAction SilentlyContinue
+                                            Write-Output "###STATUS###:AppPool Status: $($appPool.State)"
+                                            if (-not $appPool -or $appPool.State -ne 'Started') {
+                                                $success = $false
+                                                Write-Output "###ERROR###:$env:COMPUTERNAME:AppPool failed to start"
+                                            }
+                                        }
+
+                                        if ($initialStates.CustomService.IsRunning) {
+                                            $customService = Get-Service -Name $using:ServiceName -ErrorAction SilentlyContinue
+                                            Write-Output "###STATUS###:Custom Service Status: $($customService.Status)"
+                                            if (-not $customService -or $customService.Status -ne 'Running') {
+                                                $success = $false
+                                                Write-Output "###ERROR###:$env:COMPUTERNAME:Custom Service failed to start"
+                                            }
+                                        }
+
+                                        if ($success) {
+                                            Write-Output "###SUCCESS###:$env:COMPUTERNAME"
+                                        }
+                                        else {
+                                            throw "One or more previously running services failed to start properly"
+                                        }
                                     }
-                                    
-                                    # Check and restart App Pool
-                                    Import-Module WebAdministration
-                                    $appPool = Get-Item "IIS:\AppPools\$YourAppPoolName" -ErrorAction SilentlyContinue
-                                    if ($appPool -and $appPool.State -eq 'Started') {
-                                        Write-Output "###STATUS###:Restarting Application Pool..."
-                                        Restart-WebAppPool -Name $YourAppPoolName
+                                    else {
+                                        throw "Installation failed with exit code: $($process.ExitCode)"
                                     }
-                                    
-                                    # Check and restart Service
-                                    $customService = Get-Service -Name $YourServiceName -ErrorAction SilentlyContinue
-                                    if ($customService -and $customService.Status -eq 'Running') {
-                                        Write-Output "###STATUS###:Restarting Custom Service..."
-                                        Restart-Service -Name $YourServiceName -Force
-                                    }
-                                    
-                                    Write-Output "###SUCCESS###:$env:COMPUTERNAME"
                                 }
-                                else {
-                                    throw "Installation failed with exit code: $($process.ExitCode)"
+                                finally {
+                                    Set-Location -Path $originalLocation
                                 }
                             }
                             else {
                                 throw "No EXE file found in extracted contents"
                             }
-                        } -ArgumentList $zipFileName, $YourAppPoolName, $YourServiceName
-
+                        } -ArgumentList $global:currentZipFileName, $AppPoolName, $ServiceName
                         Remove-PSSession -Session $session
                     }
                     catch {
                         Write-Output "###ERROR###:${server}:$($_.Exception.Message)"
                     }
-                } -ArgumentList $server, $cred, $global:currentZipFileName, $YourAppPoolName, $YourServiceName
+                } -ArgumentList $server, $cred, $global:currentZipFileName, $AppPoolName, $ServiceName
             }
 
             Write-LogMessage "Starting parallel installation on servers..." -ProgressValue 20
@@ -1060,8 +1134,8 @@ $backOutButton.Add_Click({
                                         Write-Host "###PROGRESS###:Restarting services"
                                         Restart-Service -Name 'W3SVC'
                                         Import-Module WebAdministration
-                                        Restart-WebAppPool -Name $using:YourAppPoolName
-                                        Restart-Service -Name $using:YourServiceName
+                                        Restart-WebAppPool -Name $using:AppPoolName
+                                        Restart-Service -Name $using:ServiceName
                                         Write-Host "###PROGRESS###:Services restarted successfully"
                                     }
                                     catch {
