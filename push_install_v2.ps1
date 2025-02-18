@@ -293,7 +293,7 @@ $versionLabel.Padding = New-Object System.Windows.Forms.Padding(10, 0, 0, 5)
 
 # Calculate initial position (bottom-left)
 $versionLabel.Location = New-Object System.Drawing.Point(
-    10,  # Left margin
+    10, # Left margin
     ($form.ClientSize.Height - $versionLabel.Height - 20)  # Bottom margin
 )
 
@@ -365,7 +365,7 @@ $form.Add_Resize({
         ($form.ClientSize.Width - $signatureLabel.Width - 10),
         ($form.ClientSize.Height - $signatureLabel.Height - 20)
         )
-        $versionLabel.Location = New-Object System.Drawing.Point(10,($form.ClientSize.Height - $versionLabel.Height - 20))
+        $versionLabel.Location = New-Object System.Drawing.Point(10, ($form.ClientSize.Height - $versionLabel.Height - 20))
         $zipFilePathBox.Width = $form.ClientSize.Width - 195
         $form.Refresh()
     })
@@ -811,7 +811,7 @@ $pushZipButton.Add_Click({
 # Update Install MSI button click event
 $installMsiButton.Add_Click({
         # Disable the button during installation
-    $installMsiButton.Enabled = $false
+        $installMsiButton.Enabled = $false
     
         if (-not $global:currentZipFileName) {
             Write-LogMessage "Please push a ZIP file first." -IsError
@@ -872,16 +872,35 @@ $installMsiButton.Add_Click({
                             $exeFile = Get-ChildItem -Path $extractPath -Filter "*.exe" -Recurse | Select-Object -First 1
                             if ($exeFile) {
                                 # Change to the executable's directory before running it
-        $originalLocation = Get-Location
-        Set-Location -Path $exeFile.DirectoryName
+                                $originalLocation = Get-Location
+                                Set-Location -Path $exeFile.DirectoryName
                                 $process = Start-Process -FilePath $exeFile.FullName -ArgumentList "install" -Wait -NoNewWindow -PassThru
 
                                 if ($process.ExitCode -eq 0) {
-                                    Write-Output "###STATUS###:Restarting services on $env:COMPUTERNAME"
-                                    Restart-Service -Name 'W3SVC'
+                                    Write-Output "###STATUS###:Checking and restarting services on $env:COMPUTERNAME"
+                                    
+                                    # Check and restart IIS
+                                    $iisService = Get-Service -Name 'W3SVC'
+                                    if ($iisService.Status -eq 'Running') {
+                                        Write-Output "###STATUS###:Restarting IIS..."
+                                        Restart-Service -Name 'W3SVC' -Force
+                                    }
+                                    
+                                    # Check and restart App Pool
                                     Import-Module WebAdministration
-                                    Restart-WebAppPool -Name $YourAppPoolName
-                                    Restart-Service -Name $YourServiceName
+                                    $appPool = Get-Item "IIS:\AppPools\$YourAppPoolName" -ErrorAction SilentlyContinue
+                                    if ($appPool -and $appPool.State -eq 'Started') {
+                                        Write-Output "###STATUS###:Restarting Application Pool..."
+                                        Restart-WebAppPool -Name $YourAppPoolName
+                                    }
+                                    
+                                    # Check and restart Service
+                                    $customService = Get-Service -Name $YourServiceName -ErrorAction SilentlyContinue
+                                    if ($customService -and $customService.Status -eq 'Running') {
+                                        Write-Output "###STATUS###:Restarting Custom Service..."
+                                        Restart-Service -Name $YourServiceName -Force
+                                    }
+                                    
                                     Write-Output "###SUCCESS###:$env:COMPUTERNAME"
                                 }
                                 else {
