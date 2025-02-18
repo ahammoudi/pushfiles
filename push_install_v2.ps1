@@ -942,28 +942,37 @@ $installMsiButton.Add_Click({
                                         # Verify each service that was running
                                         if ($initialStates.IIS.IsRunning) {
                                             $iisService = Get-Service -Name 'W3SVC' -ErrorAction SilentlyContinue
-                                            Write-Output "###STATUS###:IIS Status: $($iisService.Status)"
-                                            if (-not $iisService -or $iisService.Status -ne 'Running') {
-                                                $success = $false
-                                                Write-Output "###ERROR###:$env:COMPUTERNAME:IIS failed to start"
+                                            if ($iisService) {
+                                                $status = $iisService.Status.ToString()
+                                                Write-Output "###STATUS###:IIS (W3SVC) Status: $status"
+                                                if ($status -ne 'Running') {
+                                                    $success = $false
+                                                    Write-Output "###ERROR###:$env:COMPUTERNAME:IIS (W3SVC) failed to start"
+                                                }
                                             }
                                         }
-
+                                        
                                         if ($initialStates.AppPool.IsRunning) {
-                                            $appPool = Get-Item "IIS:\AppPools\$using:AppPoolName" -ErrorAction SilentlyContinue
-                                            Write-Output "###STATUS###:AppPool Status: $($appPool.State)"
-                                            if (-not $appPool -or $appPool.State -ne 'Started') {
-                                                $success = $false
-                                                Write-Output "###ERROR###:$env:COMPUTERNAME:AppPool failed to start"
+                                            $appPool = Get-Item "IIS:\AppPools\$AppPoolName" -ErrorAction SilentlyContinue
+                                            if ($appPool) {
+                                                $status = $appPool.State.ToString()
+                                                Write-Output "###STATUS###:Application Pool ($AppPoolName) Status: $status"
+                                                if ($status -ne 'Started') {
+                                                    $success = $false
+                                                    Write-Output "###ERROR###:$env:COMPUTERNAME:Application Pool ($AppPoolName) failed to start"
+                                                }
                                             }
                                         }
-
+                                        
                                         if ($initialStates.CustomService.IsRunning) {
-                                            $customService = Get-Service -Name $using:ServiceName -ErrorAction SilentlyContinue
-                                            Write-Output "###STATUS###:Custom Service Status: $($customService.Status)"
-                                            if (-not $customService -or $customService.Status -ne 'Running') {
-                                                $success = $false
-                                                Write-Output "###ERROR###:$env:COMPUTERNAME:Custom Service failed to start"
+                                            $customService = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+                                            if ($customService) {
+                                                $status = $customService.Status.ToString()
+                                                Write-Output "###STATUS###:Custom Service ($ServiceName) Status: $status"
+                                                if ($status -ne 'Running') {
+                                                    $success = $false
+                                                    Write-Output "###ERROR###:$env:COMPUTERNAME:Custom Service ($ServiceName) failed to start"
+                                                }
                                             }
                                         }
 
