@@ -68,8 +68,9 @@ try {
     $config = Get-Content -Path "$PSScriptRoot\config\config.json" | ConvertFrom-Json
     
     $LogFile = $config.LogFile
-    $InstallerName = $config.InstallerName
     $AppPoolName = $config.AppPoolName
+    $AppPoolName2 = $config.AppPoolName2       # Add second app pool
+    $AppPoolName3 = $config.AppPoolName3       # Add third app pool
     $ServiceName = $config.ServiceName
 
     if (-not (Test-Path $LogFile)) {
@@ -855,13 +856,13 @@ $installMsiButton.Add_Click({
             # Create all installation jobs simultaneously
             $jobs = foreach ($server in $servers) {
                 Start-Job -ScriptBlock {
-                    param ($server, [PSCredential]$cred, $zipFileName, $AppPoolName, $ServiceName)
+                    param ($server, [PSCredential]$cred, $zipFileName, $AppPoolName1, $ServiceName)
                     try {
                         Write-Output "###STATUS###:Starting installation on $server"
                         $session = New-PSSession -ComputerName $server -Credential $cred
                     
                         Invoke-Command -Session $session -ScriptBlock {
-                            param ($zipFileName, $AppPoolName, $ServiceName)
+                            param ($zipFileName, $AppPoolName1, $ServiceName)
                             
                             $zipPath = "C:\temp\$zipFileName"
                             $extractPath = "C:\temp\extracted"
@@ -887,7 +888,15 @@ $installMsiButton.Add_Click({
                                                 IsRunning = $false
                                                 Service   = $null
                                             }
-                                            AppPool       = @{
+                                            AppPool1      = @{
+                                                IsRunning = $false
+                                                Object    = $null
+                                            }
+                                            AppPool2      = @{
+                                                IsRunning = $false
+                                                Object    = $null
+                                            }
+                                            AppPool3      = @{
                                                 IsRunning = $false
                                                 Object    = $null
                                             }
@@ -896,12 +905,15 @@ $installMsiButton.Add_Click({
                                                 Service   = $null
                                             }
                                         }
+                                        
     
                                         # Get service states once
                                         Import-Module WebAdministration
                                         $initialStates.IIS.Service = Get-Service -Name 'W3SVC' -ErrorAction SilentlyContinue
-                                        $initialStates.AppPool.Object = Get-Item "IIS:\AppPools\$using:AppPoolName" -ErrorAction SilentlyContinue
-                                        $initialStates.CustomService.Service = Get-Service -Name $using:ServiceName -ErrorAction SilentlyContinue
+                                        $initialStates.AppPool1.Object = Get-Item "IIS:\AppPools\$AppPoolName" -ErrorAction SilentlyContinue
+                                        $initialStates.AppPool2.Object = Get-Item "IIS:\AppPools\$AppPoolName2" -ErrorAction SilentlyContinue
+                                        $initialStates.AppPool3.Object = Get-Item "IIS:\AppPools\$AppPoolName3" -ErrorAction SilentlyContinue
+                                        $initialStates.CustomService.Service = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
 
                                         # Store initial running states
                                         if ($initialStates.IIS.Service -and $initialStates.IIS.Service.Status -eq 'Running') {
@@ -913,13 +925,20 @@ $installMsiButton.Add_Click({
                                             Write-Output "###STATUS###:IIS is already stopped, leaving as is"
                                         }
 
-                                        if ($initialStates.AppPool.Object -and $initialStates.AppPool.Object.State -eq 'Started') {
-                                            $initialStates.AppPool.IsRunning = $true
-                                            Write-Output "###STATUS###:Restarting Application Pool..."
-                                            Restart-WebAppPool -Name $using:AppPoolName
-                                        }
-                                        else {
-                                            Write-Output "###STATUS###:AppPool is already stopped, leaving as is"
+                                        # Check and restart app pools
+                                        foreach ($appPool in @(
+                                                @{ Name = $AppPoolName; State = $initialStates.AppPool1 },
+                                                @{ Name = $AppPoolName2; State = $initialStates.AppPool2 },
+                                                @{ Name = $AppPoolName3; State = $initialStates.AppPool3 }
+                                            )) {
+                                            if ($appPool.State.Object -and $appPool.State.Object.State -eq 'Started') {
+                                                $appPool.State.IsRunning = $true
+                                                Write-Output "###STATUS###:Restarting Application Pool ($($appPool.Name))..."
+                                                Restart-WebAppPool -Name $appPool.Name
+                                            }
+                                            else {
+                                                Write-Output "###STATUS###:Application Pool ($($appPool.Name)) is already stopped, leaving as is"
+                                            }
                                         }
 
                                         if ($initialStates.CustomService.Service -and $initialStates.CustomService.Service.Status -eq 'Running') {
@@ -952,14 +971,21 @@ $installMsiButton.Add_Click({
                                             }
                                         }
                                         
-                                        if ($initialStates.AppPool.IsRunning) {
-                                            $appPool = Get-Item "IIS:\AppPools\$AppPoolName" -ErrorAction SilentlyContinue
-                                            if ($appPool) {
-                                                $status = $appPool.State.ToString()
-                                                Write-Output "###STATUS###:Application Pool ($AppPoolName) Status: $status"
-                                                if ($status -ne 'Started') {
-                                                    $success = $false
-                                                    Write-Output "###ERROR###:$env:COMPUTERNAME:Application Pool ($AppPoolName) failed to start"
+                                        # Verification section after sleep
+                                        foreach ($appPool in @(
+                                                @{ Name = $AppPoolName; State = $initialStates.AppPool1 },
+                                                @{ Name = $AppPoolName2; State = $initialStates.AppPool2 },
+                                                @{ Name = $AppPoolName3; State = $initialStates.AppPool3 }
+                                            )) {
+                                            if ($appPool.State.IsRunning) {
+                                                $poolObject = Get-Item "IIS:\AppPools\$($appPool.Name)" -ErrorAction SilentlyContinue
+                                                if ($poolObject) {
+                                                    $status = $poolObject.State.ToString()
+                                                    Write-Output "###STATUS###:Application Pool ($($appPool.Name)) Status: $status"
+                                                    if ($status -ne 'Started') {
+                                                        $success = $false
+                                                        Write-Output "###ERROR###:$env:COMPUTERNAME:Application Pool ($($appPool.Name)) failed to start"
+                                                    }
                                                 }
                                             }
                                         }
@@ -1000,7 +1026,7 @@ $installMsiButton.Add_Click({
                     catch {
                         Write-Output "###ERROR###:${server}:$($_.Exception.Message)"
                     }
-                } -ArgumentList $server, $cred, $global:currentZipFileName, $AppPoolName, $ServiceName
+                } -ArgumentList $server, $cred, $global:currentZipFileName, $AppPoolName1, $ServiceName
             }
 
             Write-LogMessage "Starting parallel installation on servers..." -ProgressValue 20
@@ -1074,126 +1100,6 @@ $installMsiButton.Add_Click({
         }
     })
 
-# Add Back Out button click event
-$backOutButton.Add_Click({
-        if (-not $global:currentZipFileName) {
-            Write-LogMessage "Please push a ZIP file first." -IsError
-            return
-        }
-
-        $selectedItem = $dropdown.SelectedItem
-        if ($selectedItem -eq "Select Server List" -or -not $selectedItem) {
-            Write-LogMessage "Please select a server list." -IsError
-            return
-        }
-
-        # Add confirmation dialog
-        $result = [System.Windows.Forms.MessageBox]::Show(
-            "Are you sure you want to Backout on the selected servers?`n`nServer List: $selectedItem`nPackage: $global:currentZipFileName",
-            "Confirm Installation",
-            [System.Windows.Forms.MessageBoxButtons]::YesNo,
-            [System.Windows.Forms.MessageBoxIcon]::Question,
-            [System.Windows.Forms.MessageBoxDefaultButton]::Button2
-        )
-
-        if ($result -eq [System.Windows.Forms.DialogResult]::No) {
-            Write-LogMessage "Installation cancelled by user."
-            return
-        }
-
-        $cred = Get-GlobalCredential
-
-        try {
-            $serverListFile = ".\config\$selectedItem.txt"
-            $servers = Get-Content $serverListFile
-            $totalServers = ($servers | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }).Count
-            $currentServer = 0
-
-            foreach ($server in $servers) {
-                if (-not [string]::IsNullOrWhiteSpace($server)) {
-                    $currentServer++
-                    Update-Progress -Current $currentServer -Total $totalServers -Operation "Executing back out on servers"
-
-                    try {
-                        $job = Start-Job -ScriptBlock {
-                            param ($server, [PSCredential]$cred, $zipFileName)
-                            $session = New-PSSession -ComputerName $server -Credential $cred
-                            Invoke-Command -Session $session -ScriptBlock {
-                                param ($zipFileName)
-                                Write-Host "###PROGRESS###:Preparing back out on $env:COMPUTERNAME"
-                                $zipPath = "C:\temp\$zipFileName"
-                                $extractPath = "C:\temp\extracted"
-
-                                Write-Host "###PROGRESS###:Extracting ZIP file"
-                                Add-Type -AssemblyName System.IO.Compression.FileSystem
-                                [System.IO.Compression.ZipFile]::ExtractToDirectory($zipPath, $extractPath)
-                                $exeFile = Get-ChildItem -Path $extractPath -Filter "*.exe" -Recurse | Select-Object -First 1
-                                if ($exeFile) {
-                                    Write-Host "###PROGRESS###:Found executable: $($exeFile.Name)"
-                                    try {
-                                        Write-Host "###PROGRESS###:Starting back out"
-                                        $process = Start-Process -FilePath $exeFile.FullName -ArgumentList "uninstall" -Wait -NoNewWindow -PassThru
-
-                                        if ($process.ExitCode -eq 0) {
-                                            Write-Host "###PROGRESS###:Back out completed successfully (Exit Code: 0)"
-                                        }
-                                        else {
-                                            throw "Back out failed with exit code: $($process.ExitCode)"
-                                        }
-                                        Write-Host "###PROGRESS###:Restarting services"
-                                        Restart-Service -Name 'W3SVC'
-                                        Import-Module WebAdministration
-                                        Restart-WebAppPool -Name $using:AppPoolName
-                                        Restart-Service -Name $using:ServiceName
-                                        Write-Host "###PROGRESS###:Services restarted successfully"
-                                    }
-                                    catch {
-                                        throw "Back out failed: $_"
-                                    }
-                                }
-                                else {
-                                    throw "No EXE file found in extracted contents"
-                                }
-                            } -ArgumentList $zipFileName
-                            Remove-PSSession -Session $session
-                        } -ArgumentList $server, $cred, $global:currentZipFileName
-
-                        $job | Wait-Job
-                        $jobOutput = Receive-Job -Job $job
-                    
-                        foreach ($line in $jobOutput) {
-                            if ($line.StartsWith('###PROGRESS###:')) {
-                                $status = $line.Split(':')[1]
-                                Write-LogMessage $status -ProgressValue ([math]::Floor(($currentServer / $totalServers) * 100))
-                                [System.Windows.Forms.Application]::DoEvents()
-                            }
-                            else {
-                                $outputBox.AppendText($line + [Environment]::NewLine)
-                            }
-                        }
-                    }
-                    catch {
-                        Write-LogMessage "Error executing commands on ${server}: $($_.Exception.Message)" -IsError
-                    }
-                }
-            }
-            # Clean up temp files
-            Write-LogMessage "Cleaning up temporary files..." -ProgressValue 95
-            foreach ($server in $servers) {
-                try {
-                    Remove-TempFiles -server $server
-                }
-                catch {
-                    Write-LogMessage "Warning: Cleanup failed on $server" -IsError
-                }
-            }
-            Write-LogMessage "Back out completed." -ProgressValue 100
-        }
-        catch {
-            Write-LogMessage "Error reading server list file '$serverListFile': $($_.Exception.Message)" -IsError
-            $progressBar.Visible = $false
-        }
-    })
 
 # Center buttons initially
 Set-ButtonsAlignment
