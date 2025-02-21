@@ -153,12 +153,6 @@ $form.Width = 800
 $form.Height = 600
 $form.MinimumSize = New-Object System.Drawing.Size(600, 400)
 
-# Add form cleanup on close
-$form.Add_FormClosing({
-        param($formSender, $e)
-        if ($global:cred) { $global:cred = $null }
-        Get-Job | Remove-Job -Force -ErrorAction SilentlyContinue
-    })
 
 $statusStrip = New-Object System.Windows.Forms.StatusStrip
 $statusLabel = New-Object System.Windows.Forms.ToolStripStatusLabel
@@ -226,16 +220,19 @@ $browseButton = New-Object System.Windows.Forms.Button
 $browseButton.Text = "Select folder"
 $browseButton.Location = New-Object System.Drawing.Point(10, 60)
 $browseButton.Width = 160
-$browseButton.Height = 20
+$browseButton.Height = 30
 $form.Controls.Add($browseButton)
 
 # TextBox to display the selected ZIP file path
 $zipFilePathBox = New-Object System.Windows.Forms.TextBox
 $zipFilePathBox.Location = New-Object System.Drawing.Point(175, 60)
 $zipFilePathBox.Width = $form.ClientSize.Width - 195  # Dynamic width
+$zipFilePathBox.Height = 30  # Increased height
+$zipFilePathBox.Multiline = $true  # Enable multiline for increased height
+$zipFilePathBox.ScrollBars = "Vertical"  # Add scrollbars for longer paths
 $zipFilePathBox.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor 
-[System.Windows.Forms.AnchorStyles]::Left -bor 
-[System.Windows.Forms.AnchorStyles]::Right
+                        [System.Windows.Forms.AnchorStyles]::Left -bor 
+                        [System.Windows.Forms.AnchorStyles]::Right
 $form.Controls.Add($zipFilePathBox)
 
 # Browse button click event
@@ -419,47 +416,62 @@ function Test-Credential {
 # Function to write to the log file and output box
 function Write-LogMessage {
     param(
+        [Parameter(Mandatory=$true)]
         [string]$Message,
         [switch]$IsError,
+        [ValidateRange(-1, 100)]
         [int]$ProgressValue = -1
     )
     
     $Timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
     
-    # Add spacing for new tasks
-    if ($Message -match "^(Starting|Completed|Push completed|Installation completed)") {
-        $LogEntry = "`n[$Timestamp] ----------------------------------------`n[$Timestamp] INFO: $Message"
+    # Add spacing for new tasks with improved pattern matching
+    $LogEntry = if ($Message -match "^(Starting|Completed|Push|Installation|Sync)\s") {
+        "`n[$Timestamp] ----------------------------------------`n[$Timestamp] $($IsError ? 'ERROR:' : 'INFO:') $Message"
     }
     else {
-        $LogEntry = "[$Timestamp] INFO: $Message"
+        "[$Timestamp] $($IsError ? 'ERROR:' : 'INFO:') $Message"
     }
     
-    if ($IsError) {
-        $LogEntry = "[$Timestamp] ERROR: $Message"
-        Write-Error $LogEntry
-        $outputBox.SelectionColor = [System.Drawing.Color]::Red
-    }
-    else {
-        Write-Host $LogEntry
-        $outputBox.SelectionColor = [System.Drawing.Color]::Black
-    }
+    try {
+        # Handle error messages
+        if ($IsError) {
+            Write-Error $Message
+            $outputBox.SelectionStart = $outputBox.TextLength
+            $outputBox.SelectionLength = 0
+            $outputBox.SelectionColor = [System.Drawing.Color]::Red
+        }
+        else {
+            Write-Host $LogEntry
+            $outputBox.SelectionStart = $outputBox.TextLength
+            $outputBox.SelectionLength = 0
+            $outputBox.SelectionColor = [System.Drawing.Color]::Black
+        }
 
-    if ($ProgressValue -ge 0) {
-        $progressBar.Visible = $true
-        $progressBar.Value = $ProgressValue
-        $progressLabel.Text = "$ProgressValue%"
-        $progressLabel.Visible = $true
+        # Handle progress updates
+        if ($ProgressValue -ge 0) {
+            $progressBar.Visible = $true
+            $progressBar.Value = [Math]::Min([Math]::Max($ProgressValue, 0), 100)
+            $progressLabel.Text = "$($progressBar.Value)%"
+            $progressLabel.Visible = $true
+        }
+        elseif ($ProgressValue -eq 100) {
+            $progressBar.Visible = $false
+            $progressBar.Value = 0
+            $progressLabel.Visible = $false
+        }
+
+        # Write to log file and update output box
+        Add-Content -Path $LogFile -Value $LogEntry
+        $outputBox.AppendText($LogEntry + [Environment]::NewLine)
+        $outputBox.ScrollToCaret()
+
+        # Force UI update
         [System.Windows.Forms.Application]::DoEvents()
     }
-    elseif ($ProgressValue -eq 100) {
-        $progressBar.Visible = $false
-        $progressBar.Value = 0
-        $progressLabel.Visible = $false
+    catch {
+        Write-Error "Failed to write log message: $($_.Exception.Message)"
     }
-
-    Add-Content -Path $LogFile -Value $LogEntry
-    $outputBox.AppendText($LogEntry + [Environment]::NewLine)
-    $outputBox.ScrollToCaret()
 }
 
 # Update form closing event handler
