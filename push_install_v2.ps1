@@ -150,7 +150,7 @@ function Update-Progress {
 $form = New-Object System.Windows.Forms.Form
 $form.Text = "Deployment Tool"
 $form.Width = 800
-$form.Height = 600
+$form.Height = 700  # Increase form height to show all buttons (was 600)
 $form.MinimumSize = New-Object System.Drawing.Size(600, 400)
 
 
@@ -237,24 +237,31 @@ $form.Controls.Add($zipFilePathBox)
 
 # Browse button click event
 $browseButton.Add_Click({
-        $folderDialog = New-Object System.Windows.Forms.FolderBrowserDialog
-        $folderDialog.Description = "Select folder"
-        $folderDialog.ShowNewFolderButton = $true
+    $folderDialog = New-Object System.Windows.Forms.FolderBrowserDialog
+    $folderDialog.Description = "Select folder"
+    $folderDialog.ShowNewFolderButton = $true
     
-        # Set initial directory from config
-        if ($config -and $config.DefaultBrowsePath -and (Test-Path $config.DefaultBrowsePath)) {
-            $folderDialog.SelectedPath = $config.DefaultBrowsePath
-        }
+    # Set initial directory from config
+    if ($config -and $config.DefaultBrowsePath -and (Test-Path $config.DefaultBrowsePath)) {
+        $folderDialog.SelectedPath = $config.DefaultBrowsePath
+    }
+    else {
+        $folderDialog.SelectedPath = [Environment]::GetFolderPath('Desktop')
+    }
+
+    # Set the root folder to Desktop for better navigation
+    $folderDialog.RootFolder = [System.Environment+SpecialFolder]::Desktop
     
-        if ($folderDialog.ShowDialog() -eq "OK") {
-            $zipFilePathBox.Text = $folderDialog.SelectedPath
-        }
-    })
+    if ($folderDialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+        $zipFilePathBox.Text = $folderDialog.SelectedPath
+    }
+})
+
 # Output TextBox
 $outputBox = New-Object System.Windows.Forms.RichTextBox
 $outputBox.Location = New-Object System.Drawing.Point(10, 110)
 $outputBox.Width = 760
-$outputBox.Height = 370
+$outputBox.Height = 300  # Reduce height to make room for two rows of buttons
 $outputBox.Multiline = $true
 $outputBox.ScrollBars = "Vertical"
 $outputBox.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right
@@ -313,12 +320,12 @@ $installMsiButton.Width = 160
 $installMsiButton.Height = 40
 $form.Controls.Add($installMsiButton)
 
-# Back Out button
-$backOutButton = New-Object System.Windows.Forms.Button
-$backOutButton.Text = "Back Out"
-$backOutButton.Width = 160
-$backOutButton.Height = 40
-$form.Controls.Add($backOutButton)
+# Rollback button
+$rollbackButton = New-Object System.Windows.Forms.Button
+$rollbackButton.Text = "Rollback"
+$rollbackButton.Width = 160
+$rollbackButton.Height = 40
+$form.Controls.Add($rollbackButton)
 
 # Documentation link button
 $docButton = New-Object System.Windows.Forms.LinkLabel
@@ -330,25 +337,89 @@ $docButton.LinkColor = [System.Drawing.Color]::Blue
 $docButton.ActiveLinkColor = [System.Drawing.Color]::DarkBlue
 $form.Controls.Add($docButton)
 
-# Function to center buttons
+# Replace the Restart Services button with separate Stop and Start buttons
+$stopServicesButton = New-Object System.Windows.Forms.Button
+$stopServicesButton.Text = "Stop Services"
+$stopServicesButton.Width = 160
+$stopServicesButton.Height = 40
+$form.Controls.Add($stopServicesButton)
+
+$startServicesButton = New-Object System.Windows.Forms.Button
+$startServicesButton.Text = "Start Services"
+$startServicesButton.Width = 160
+$startServicesButton.Height = 40
+$form.Controls.Add($startServicesButton)
+
+# Remove the old restart button
+$form.Controls.Remove($restartServicesButton)
+
+# Rename the Back Out button to Check Version button
+$checkVersionButton = New-Object System.Windows.Forms.Button
+$checkVersionButton.Text = "Check Version"
+$checkVersionButton.Width = 160
+$checkVersionButton.Height = 40
+$form.Controls.Add($checkVersionButton)
+
+# Remove the old backOutButton if it exists
+$form.Controls.Remove($backOutButton)
+
+# Update the Set-ButtonsAlignment function for two rows of buttons
 function Set-ButtonsAlignment {
     $formWidth = [int]$form.ClientSize.Width
     $buttonWidth = [int]$pushZipButton.Width
     $spacing = [int]20
-    $totalWidth = [int](($buttonWidth * 4) + ($spacing * 3))
-    $startX = [int](($formWidth - $totalWidth) / 2)
-    $y = [int]($outputBox.Location.Y + $outputBox.Height + 10)
+    
+    # First row - 3 buttons
+    $totalWidthRow1 = [int](($buttonWidth * 3) + ($spacing * 2))
+    $startXRow1 = [int](($formWidth - $totalWidthRow1) / 2)
+    $yRow1 = [int]($outputBox.Location.Y + $outputBox.Height + 10)
 
-    $pushZipButton.Location = New-Object System.Drawing.Point($startX, $y)
-    $installMsiButton.Location = New-Object System.Drawing.Point(($startX + $buttonWidth + $spacing), $y)
-    $backOutButton.Location = New-Object System.Drawing.Point(($startX + ($buttonWidth + $spacing) * 2), $y)
-    $syncButton.Location = New-Object System.Drawing.Point(($startX + ($buttonWidth + $spacing) * 3), $y)
+    # Second row - 4 buttons
+    $totalWidthRow2 = [int](($buttonWidth * 4) + ($spacing * 3))
+    $startXRow2 = [int](($formWidth - $totalWidthRow2) / 2)
+    $yRow2 = [int]($yRow1 + $pushZipButton.Height + 10)
 
-    # Position doc button below other buttons
+    # Position buttons in first row: Sync Release, Push Zip File, Stop Services
+    $syncButton.Location = New-Object System.Drawing.Point($startXRow1, $yRow1)
+    $pushZipButton.Location = New-Object System.Drawing.Point(($startXRow1 + $buttonWidth + $spacing), $yRow1)
+    $stopServicesButton.Location = New-Object System.Drawing.Point(($startXRow1 + ($buttonWidth + $spacing) * 2), $yRow1)
+
+    # Position buttons in second row: Install MSI, Start Services, Check Version, Rollback
+    $installMsiButton.Location = New-Object System.Drawing.Point($startXRow2, $yRow2)
+    $startServicesButton.Location = New-Object System.Drawing.Point(($startXRow2 + $buttonWidth + $spacing), $yRow2)
+    $checkVersionButton.Location = New-Object System.Drawing.Point(($startXRow2 + ($buttonWidth + $spacing) * 2), $yRow2)
+    $rollbackButton.Location = New-Object System.Drawing.Point(($startXRow2 + ($buttonWidth + $spacing) * 3), $yRow2)
+
+    # Position doc button below all buttons
     $docButton.Location = New-Object System.Drawing.Point(
         [int](($formWidth - $docButton.Width) / 2),
-        [int]($y + $pushZipButton.Height + 10)
+        [int]($yRow2 + $installMsiButton.Height + 10)
     )
+
+    # Ensure all buttons are on the form
+    $form.Controls.Add($syncButton)
+    $form.Controls.Add($pushZipButton)
+    $form.Controls.Add($stopServicesButton)
+    $form.Controls.Add($installMsiButton)
+    $form.Controls.Add($startServicesButton)
+    $form.Controls.Add($checkVersionButton)
+    $form.Controls.Add($rollbackButton)
+    $form.Controls.Add($docButton)
+}
+
+# Function to get the status file path for a server
+function Get-ServiceStatusFilePath {
+    param(
+        [string]$ServerList,
+        [string]$Server
+    )
+    
+    $statusDir = Join-Path $PSScriptRoot "status"
+    if (-not (Test-Path $statusDir)) {
+        New-Item -ItemType Directory -Path $statusDir | Out-Null
+    }
+    
+    return Join-Path $statusDir "${ServerList}_${Server}_status.xml"
 }
 
 # Add resize event handler
@@ -427,10 +498,10 @@ function Write-LogMessage {
     
     # Add spacing for new tasks with improved pattern matching
     $LogEntry = if ($Message -match "^(Starting|Completed|Push|Installation|Sync)\s") {
-        "`n[$Timestamp] ----------------------------------------`n[$Timestamp] $($IsError ? 'ERROR:' : 'INFO:') $Message"
+        "`n[$Timestamp] ----------------------------------------`n[$Timestamp] $(if ($IsError) { 'ERROR:' } else { 'INFO:' }) $Message"
     }
     else {
-        "[$Timestamp] $($IsError ? 'ERROR:' : 'INFO:') $Message"
+        "[$Timestamp] $(if ($IsError) { 'ERROR:' } else { 'INFO:' }) $Message"
     }
     
     try {
@@ -943,136 +1014,8 @@ $installMsiButton.Add_Click({
                                     Set-Location -Path $exeFile.DirectoryName
                                     $process = Start-Process -FilePath $exeFile.FullName -ArgumentList "install" -Wait -NoNewWindow -PassThru
                         
-                                    # Service check and restart section in Invoke-Command block
                                     if ($process.ExitCode -eq 0) {
-                                        Write-Output "###STATUS###:Checking services on $env:COMPUTERNAME"
-    
-                                        # Check initial states and store service objects
-                                        $initialStates = @{
-                                            IIS           = @{
-                                                IsRunning = $false
-                                                Service   = $null
-                                            }
-                                            AppPool1      = @{
-                                                IsRunning = $false
-                                                Object    = $null
-                                            }
-                                            AppPool2      = @{
-                                                IsRunning = $false
-                                                Object    = $null
-                                            }
-                                            AppPool3      = @{
-                                                IsRunning = $false
-                                                Object    = $null
-                                            }
-                                            CustomService = @{
-                                                IsRunning = $false
-                                                Service   = $null
-                                            }
-                                        }
-                                        
-    
-                                        # Get service states once
-                                        Import-Module WebAdministration
-                                        $initialStates.IIS.Service = Get-Service -Name 'W3SVC' -ErrorAction SilentlyContinue
-                                        $initialStates.AppPool1.Object = Get-Item "IIS:\AppPools\$AppPoolName" -ErrorAction SilentlyContinue
-                                        $initialStates.AppPool2.Object = Get-Item "IIS:\AppPools\$AppPoolName2" -ErrorAction SilentlyContinue
-                                        $initialStates.AppPool3.Object = Get-Item "IIS:\AppPools\$AppPoolName3" -ErrorAction SilentlyContinue
-                                        $initialStates.CustomService.Service = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
-
-                                        # Store initial running states
-                                        if ($initialStates.IIS.Service -and $initialStates.IIS.Service.Status -eq 'Running') {
-                                            $initialStates.IIS.IsRunning = $true
-                                            Write-Output "###STATUS###:Restarting IIS..."
-                                            Restart-Service -Name 'W3SVC' -Force
-                                        }
-                                        else {
-                                            Write-Output "###STATUS###:IIS is already stopped, leaving as is"
-                                        }
-
-                                        # Check and restart app pools
-                                        foreach ($appPool in @(
-                                                @{ Name = $AppPoolName; State = $initialStates.AppPool1 },
-                                                @{ Name = $AppPoolName2; State = $initialStates.AppPool2 },
-                                                @{ Name = $AppPoolName3; State = $initialStates.AppPool3 }
-                                            )) {
-                                            if ($appPool.State.Object -and $appPool.State.Object.State -eq 'Started') {
-                                                $appPool.State.IsRunning = $true
-                                                Write-Output "###STATUS###:Restarting Application Pool ($($appPool.Name))..."
-                                                Restart-WebAppPool -Name $appPool.Name
-                                            }
-                                            else {
-                                                Write-Output "###STATUS###:Application Pool ($($appPool.Name)) is already stopped, leaving as is"
-                                            }
-                                        }
-
-                                        if ($initialStates.CustomService.Service -and $initialStates.CustomService.Service.Status -eq 'Running') {
-                                            $initialStates.CustomService.IsRunning = $true
-                                            Write-Output "###STATUS###:Restarting Custom Service..."
-                                            Restart-Service -Name $using:ServiceName -Force
-                                        }
-                                        else {
-                                            Write-Output "###STATUS###:Custom Service is already stopped, leaving as is"
-                                        }
-
-                                        # Wait for services to stabilize
-                                        Write-Output "###STATUS###:Waiting for services to stabilize..."
-                                        Start-Sleep -Seconds 5
-
-                                        # Verify only services that were running
-                                        Write-Output "###STATUS###:Verifying services status..."
-                                        $success = $true
-
-                                        # Verify each service that was running
-                                        if ($initialStates.IIS.IsRunning) {
-                                            $iisService = Get-Service -Name 'W3SVC' -ErrorAction SilentlyContinue
-                                            if ($iisService) {
-                                                $status = $iisService.Status.ToString()
-                                                Write-Output "###STATUS###:IIS (W3SVC) Status: $status"
-                                                if ($status -ne 'Running') {
-                                                    $success = $false
-                                                    Write-Output "###ERROR###:$env:COMPUTERNAME:IIS (W3SVC) failed to start"
-                                                }
-                                            }
-                                        }
-                                        
-                                        # Verification section after sleep
-                                        foreach ($appPool in @(
-                                                @{ Name = $AppPoolName; State = $initialStates.AppPool1 },
-                                                @{ Name = $AppPoolName2; State = $initialStates.AppPool2 },
-                                                @{ Name = $AppPoolName3; State = $initialStates.AppPool3 }
-                                            )) {
-                                            if ($appPool.State.IsRunning) {
-                                                $poolObject = Get-Item "IIS:\AppPools\$($appPool.Name)" -ErrorAction SilentlyContinue
-                                                if ($poolObject) {
-                                                    $status = $poolObject.State.ToString()
-                                                    Write-Output "###STATUS###:Application Pool ($($appPool.Name)) Status: $status"
-                                                    if ($status -ne 'Started') {
-                                                        $success = $false
-                                                        Write-Output "###ERROR###:$env:COMPUTERNAME:Application Pool ($($appPool.Name)) failed to start"
-                                                    }
-                                                }
-                                            }
-                                        }
-                                        
-                                        if ($initialStates.CustomService.IsRunning) {
-                                            $customService = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
-                                            if ($customService) {
-                                                $status = $customService.Status.ToString()
-                                                Write-Output "###STATUS###:Custom Service ($ServiceName) Status: $status"
-                                                if ($status -ne 'Running') {
-                                                    $success = $false
-                                                    Write-Output "###ERROR###:$env:COMPUTERNAME:Custom Service ($ServiceName) failed to start"
-                                                }
-                                            }
-                                        }
-
-                                        if ($success) {
-                                            Write-Output "###SUCCESS###:$env:COMPUTERNAME"
-                                        }
-                                        else {
-                                            throw "One or more previously running services failed to start properly"
-                                        }
+                                        Write-Output "###SUCCESS###:$env:COMPUTERNAME"
                                     }
                                     else {
                                         throw "Installation failed with exit code: $($process.ExitCode)"
@@ -1165,6 +1108,929 @@ $installMsiButton.Add_Click({
         }
     })
 
+# Add the Stop Services button click event
+$stopServicesButton.Add_Click({
+    # Disable the button during stop operation
+    $stopServicesButton.Enabled = $false
+    
+    $selectedItem = $dropdown.SelectedItem
+    if ($selectedItem -eq "Select Server List" -or -not $selectedItem) {
+        Write-LogMessage "Please select a server list." -IsError
+        $stopServicesButton.Enabled = $true
+        return
+    }
+
+    # Add confirmation dialog
+    $result = [System.Windows.Forms.MessageBox]::Show(
+        "Are you sure you want to stop services on the selected servers?`n`nServer List: $selectedItem",
+        "Confirm Service Stop",
+        [System.Windows.Forms.MessageBoxButtons]::YesNo,
+        [System.Windows.Forms.MessageBoxIcon]::Question,
+        [System.Windows.Forms.MessageBoxDefaultButton]::Button2
+    )
+
+    if ($result -eq [System.Windows.Forms.DialogResult]::No) {
+        Write-LogMessage "Service stop cancelled by user."
+        $stopServicesButton.Enabled = $true
+        return
+    }
+    
+    $cred = Get-GlobalCredential
+
+    try {
+        # Clear previous progress
+        $progressBar.Value = 0
+        $progressLabel.Text = "0%"
+        $progressBar.Visible = $true
+        $progressLabel.Visible = $true
+    
+        Write-LogMessage "Starting service stop process..." -ProgressValue 0
+
+        $serverListFile = ".\config\$selectedItem.txt"
+        $servers = Get-Content $serverListFile | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+
+        Write-LogMessage "Preparing for parallel service stop..." -ProgressValue 10
+
+        # Create all stop jobs simultaneously
+        $jobs = foreach ($server in $servers) {
+            Start-Job -ScriptBlock {
+                param ($server, [PSCredential]$cred, $AppPoolName, $AppPoolName2, $AppPoolName3, $ServiceName, $selectedItem, $statusFilePath)
+                try {
+                    Write-Output "###STATUS###:Checking service status on $server"
+                    $session = New-PSSession -ComputerName $server -Credential $cred
+                
+                    Invoke-Command -Session $session -ScriptBlock {
+                        param ($AppPoolName, $AppPoolName2, $AppPoolName3, $ServiceName, $statusFilePath)
+                        
+                        # Check states and store service objects
+                        $serviceStates = @{
+                            IIS = @{
+                                Name = "W3SVC"
+                                IsRunning = $false
+                            }
+                            AppPools = @(
+                                @{
+                                    Name = $AppPoolName
+                                    IsRunning = $false
+                                },
+                                @{
+                                    Name = $AppPoolName2
+                                    IsRunning = $false
+                                },
+                                @{
+                                    Name = $AppPoolName3
+                                    IsRunning = $false
+                                }
+                            )
+                            CustomService = @{
+                                Name = $ServiceName
+                                IsRunning = $false
+                            }
+                        }
+                        
+                        # Get service states
+                        Import-Module WebAdministration
+                        
+                        # Check IIS status
+                        $iisService = Get-Service -Name 'W3SVC' -ErrorAction SilentlyContinue
+                        if ($iisService -and $iisService.Status -eq 'Running') {
+                            $serviceStates.IIS.IsRunning = $true
+                            Write-Output "###STATUS###:IIS (W3SVC) is running, will be stopped"
+                        }
+
+                        # Check app pools
+                        foreach ($i in 0..2) {
+                            $appPoolName = $serviceStates.AppPools[$i].Name
+                            if ($appPoolName) {
+                                $appPool = Get-Item "IIS:\AppPools\$appPoolName" -ErrorAction SilentlyContinue
+                                if ($appPool -and $appPool.State -eq 'Started') {
+                                    $serviceStates.AppPools[$i].IsRunning = $true
+                                    Write-Output "###STATUS###:Application Pool ($appPoolName) is running, will be stopped"
+                                }
+                            }
+                        }
+
+                        # Check custom service
+                        $customService = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+                        if ($customService -and $customService.Status -eq 'Running') {
+                            $serviceStates.CustomService.IsRunning = $true
+                            Write-Output "###STATUS###:Custom Service ($ServiceName) is running, will be stopped"
+                        }
+
+                        # Stop services in reverse order
+                        # 1. Stop custom service first
+                        if ($serviceStates.CustomService.IsRunning) {
+                            Write-Output "###STATUS###:Stopping Custom Service ($ServiceName)..."
+                            Stop-Service -Name $ServiceName -Force
+                        }
+
+                        # 2. Stop app pools
+                        foreach ($appPool in $serviceStates.AppPools) {
+                            if ($appPool.IsRunning) {
+                                Write-Output "###STATUS###:Stopping Application Pool ($($appPool.Name))..."
+                                Stop-WebAppPool -Name $appPool.Name
+                            }
+                        }
+
+                        # 3. Stop IIS last
+                        if ($serviceStates.IIS.IsRunning) {
+                            Write-Output "###STATUS###:Stopping IIS (W3SVC)..."
+                            Stop-Service -Name 'W3SVC' -Force
+                        }
+
+                        # Verify all stopped correctly
+                        $allStopped = $true
+                        
+                        # Verify custom service
+                        if ($serviceStates.CustomService.IsRunning) {
+                            $customService = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+                            if ($customService -and $customService.Status -ne 'Stopped') {
+                                $allStopped = $false
+                                Write-Output "###ERROR###:$env:COMPUTERNAME:Custom Service ($ServiceName) failed to stop"
+                            }
+                        }
+                        
+                        # Verify app pools
+                        foreach ($appPool in $serviceStates.AppPools) {
+                            if ($appPool.IsRunning) {
+                                $poolObject = Get-Item "IIS:\AppPools\$($appPool.Name)" -ErrorAction SilentlyContinue
+                                if ($poolObject -and $poolObject.State -ne 'Stopped') {
+                                    $allStopped = $false
+                                    Write-Output "###ERROR###:$env:COMPUTERNAME:Application Pool ($($appPool.Name)) failed to stop"
+                                }
+                            }
+                        }
+                        
+                        # Verify IIS
+                        if ($serviceStates.IIS.IsRunning) {
+                            $iisService = Get-Service -Name 'W3SVC' -ErrorAction SilentlyContinue
+                            if ($iisService -and $iisService.Status -ne 'Stopped') {
+                                $allStopped = $false
+                                Write-Output "###ERROR###:$env:COMPUTERNAME:IIS (W3SVC) failed to stop"
+                            }
+                        }
+
+                        # Return status and save to file
+                        if ($allStopped) {
+                            # Convert to XML and save
+                            $serviceStates | Export-Clixml -Path "C:\temp\service_state.xml" -Force
+                            Write-Output "###STATEFILE###:C:\temp\service_state.xml"
+                            Write-Output "###SUCCESS###:$env:COMPUTERNAME"
+                        }
+                        else {
+                            throw "One or more services failed to stop properly"
+                        }
+                    } -ArgumentList $AppPoolName, $AppPoolName2, $AppPoolName3, $ServiceName, $statusFilePath
+                    
+                    # Copy the state file from the remote server to local
+                    $remoteStateFile = Invoke-Command -Session $session -ScriptBlock {
+                        Get-Item -Path "C:\temp\service_state.xml" -ErrorAction SilentlyContinue
+                    }
+                    
+                    if ($remoteStateFile) {
+                        Copy-Item -Path "C:\temp\service_state.xml" -Destination $statusFilePath -FromSession $session -Force
+                        Write-Output "###LOCALSTATEFILE###:$statusFilePath"
+                    }
+                    
+                    Remove-PSSession -Session $session
+                }
+                catch {
+                    Write-Output "###ERROR###:${server}:$($_.Exception.Message)"
+                }
+            } -ArgumentList $server, $cred, $AppPoolName, $AppPoolName2, $AppPoolName3, $ServiceName, $selectedItem, (Get-ServiceStatusFilePath -ServerList $selectedItem -Server $server)
+        }
+
+        Write-LogMessage "Starting parallel service stop on servers..." -ProgressValue 20
+    
+        $totalJobs = $jobs.Count
+        $lastProgress = 20
+        $processedJobs = @()
+
+        # Monitor jobs until all are complete
+        while ($jobs | Where-Object { $_.State -eq 'Running' -or ($_.State -eq 'Completed' -and $_ -notin $processedJobs) }) {
+            $completed = ($jobs | Where-Object { $_.State -eq 'Completed' }).Count
+            $progress = 20 + [math]::Floor(($completed / $totalJobs) * 80)
+
+            if ($progress -ne $lastProgress) {
+                Write-LogMessage "Stopping services on servers... ($completed/$totalJobs complete)" -ProgressValue $progress
+                $lastProgress = $progress
+            }
+
+            # Process completed jobs
+            foreach ($job in ($jobs | Where-Object { $_.State -eq 'Completed' -and $_ -notin $processedJobs })) {
+                $output = Receive-Job -Job $job
+                foreach ($line in $output) {
+                    if ($line.StartsWith('###SUCCESS###:')) {
+                        $server = $line.Split(':')[1]
+                        Write-LogMessage "Service stop completed: $server"
+                    }
+                    elseif ($line.StartsWith('###ERROR###:')) {
+                        $parts = $line.Split(':')
+                        Write-LogMessage "Service stop failed: $($parts[1]) - $($parts[2])" -IsError
+                    }
+                    elseif ($line.StartsWith('###STATUS###:')) {
+                        $status = $line.Split(':')[1]
+                        Write-LogMessage $status
+                    }
+                    elseif ($line.StartsWith('###LOCALSTATEFILE###:')) {
+                        $stateFile = $line.Split(':')[1]
+                        Write-LogMessage "Service state saved to: $stateFile"
+                    }
+                }
+                $processedJobs += $job
+                Remove-Job -Job $job
+            }
+            [System.Windows.Forms.Application]::DoEvents()
+            Start-Sleep -Milliseconds 100
+        }
+
+        # Final check for any remaining jobs
+        foreach ($job in ($jobs | Where-Object { $_.State -eq 'Completed' -and $_ -notin $processedJobs })) {
+            Receive-Job -Job $job | Out-Null
+            Remove-Job -Job $job
+        }
+
+        Write-LogMessage "Service stop completed on all servers." -ProgressValue 100
+    }
+    catch {
+        Write-LogMessage "Error during service stop: $($_.Exception.Message)" -IsError
+        $progressBar.Visible = $false 
+    }
+    finally {
+        # Cleanup any remaining jobs
+        $jobs | Where-Object { $_ } | Remove-Job -Force -ErrorAction SilentlyContinue
+        Get-PSSession | Remove-PSSession -ErrorAction SilentlyContinue
+        $stopServicesButton.Enabled = $true
+        $progressBar.Value = 0
+        $progressLabel.Text = "0%"
+    }
+})
+
+# Add the Start Services button click event
+$startServicesButton.Add_Click({
+    # Disable the button during start operation
+    $startServicesButton.Enabled = $false
+    
+    $selectedItem = $dropdown.SelectedItem
+    if ($selectedItem -eq "Select Server List" -or -not $selectedItem) {
+        Write-LogMessage "Please select a server list." -IsError
+        $startServicesButton.Enabled = $true
+        return
+    }
+
+    # Add confirmation dialog
+    $result = [System.Windows.Forms.MessageBox]::Show(
+        "Are you sure you want to start previously stopped services on the selected servers?`n`nServer List: $selectedItem",
+        "Confirm Service Start",
+        [System.Windows.Forms.MessageBoxButtons]::YesNo,
+        [System.Windows.Forms.MessageBoxIcon]::Question,
+        [System.Windows.Forms.MessageBoxDefaultButton]::Button2
+    )
+
+    if ($result -eq [System.Windows.Forms.DialogResult]::No) {
+        Write-LogMessage "Service start cancelled by user."
+        $startServicesButton.Enabled = $true
+        return
+    }
+    
+    $cred = Get-GlobalCredential
+
+    try {
+        # Clear previous progress
+        $progressBar.Value = 0
+        $progressLabel.Text = "0%"
+        $progressBar.Visible = $true
+        $progressLabel.Visible = $true
+    
+        Write-LogMessage "Starting service start process..." -ProgressValue 0
+
+        $serverListFile = ".\config\$selectedItem.txt"
+        $servers = Get-Content $serverListFile | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+
+        Write-LogMessage "Preparing for parallel service start..." -ProgressValue 10
+
+        # Create all start jobs simultaneously
+        $jobs = foreach ($server in $servers) {
+            $statusFilePath = Get-ServiceStatusFilePath -ServerList $selectedItem -Server $server
+            
+            if (-not (Test-Path $statusFilePath)) {
+                Write-LogMessage "No state file found for $server, skipping." -IsError
+                continue
+            }
+            
+            Start-Job -ScriptBlock {
+                param ($server, [PSCredential]$cred, $statusFilePath)
+                try {
+                    Write-Output "###STATUS###:Starting services on $server based on saved state"
+                    
+                    # First, copy the local state file to the remote server
+                    $session = New-PSSession -ComputerName $server -Credential $cred
+                    
+                    # Copy state file to remote server
+                    Copy-Item -Path $statusFilePath -Destination "C:\temp\service_state.xml" -ToSession $session -Force
+                    
+                    Invoke-Command -Session $session -ScriptBlock {
+                        param ($statusFilePath)
+                        
+                        # If the state file doesn't exist, report error
+                        if (-not (Test-Path "C:\temp\service_state.xml")) {
+                            throw "State file not found on remote server"
+                        }
+                        
+                        # Import the saved state
+                        $serviceStates = Import-Clixml -Path "C:\temp\service_state.xml"
+                        
+                        Import-Module WebAdministration
+                        
+                        # Start services in correct order:
+                        # 1. Start IIS first
+                        if ($serviceStates.IIS.IsRunning) {
+                            Write-Output "###STATUS###:Starting IIS (W3SVC)..."
+                            Start-Service -Name 'W3SVC' -ErrorAction SilentlyContinue
+                        }
+                        
+                        # 2. Start app pools
+                        foreach ($appPool in $serviceStates.AppPools) {
+                            if ($appPool.IsRunning) {
+                                Write-Output "###STATUS###:Starting Application Pool ($($appPool.Name))..."
+                                Start-WebAppPool -Name $appPool.Name -ErrorAction SilentlyContinue
+                            }
+                        }
+                        
+                        # 3. Start custom service last
+                        if ($serviceStates.CustomService.IsRunning) {
+                            Write-Output "###STATUS###:Starting Custom Service ($($serviceStates.CustomService.Name))..."
+                            Start-Service -Name $serviceStates.CustomService.Name -ErrorAction SilentlyContinue
+                        }
+                        
+                        # Wait for services to stabilize
+                        Write-Output "###STATUS###:Waiting for services to stabilize..."
+                        Start-Sleep -Seconds 5
+                        
+                        # Verify services are running as expected
+                        $allStarted = $true
+                        
+                        # Check IIS
+                        if ($serviceStates.IIS.IsRunning) {
+                            $iisService = Get-Service -Name 'W3SVC' -ErrorAction SilentlyContinue
+                            if ($iisService) {
+                                $status = $iisService.Status.ToString()
+                                Write-Output "###STATUS###:IIS (W3SVC) Status: $status"
+                                if ($status -ne 'Running') {
+                                    $allStarted = $false
+                                    Write-Output "###ERROR###:$env:COMPUTERNAME:IIS (W3SVC) failed to start"
+                                }
+                            }
+                        }
+                        
+                        # Check app pools
+                        foreach ($appPool in $serviceStates.AppPools) {
+                            if ($appPool.IsRunning) {
+                                $poolObject = Get-Item "IIS:\AppPools\$($appPool.Name)" -ErrorAction SilentlyContinue
+                                if ($poolObject) {
+                                    $status = $poolObject.State.ToString()
+                                    Write-Output "###STATUS###:Application Pool ($($appPool.Name)) Status: $status"
+                                    if ($status -ne 'Started') {
+                                        $allStarted = $false
+                                        Write-Output "###ERROR###:$env:COMPUTERNAME:Application Pool ($($appPool.Name)) failed to start"
+                                    }
+                                }
+                            }
+                        }
+                        
+                        # Check custom service
+                        if ($serviceStates.CustomService.IsRunning) {
+                            $customService = Get-Service -Name $serviceStates.CustomService.Name -ErrorAction SilentlyContinue
+                            if ($customService) {
+                                $status = $customService.Status.ToString()
+                                Write-Output "###STATUS###:Custom Service ($($serviceStates.CustomService.Name)) Status: $status"
+                                if ($status -ne 'Running') {
+                                    $allStarted = $false
+                                    Write-Output "###ERROR###:$env:COMPUTERNAME:Custom Service ($($serviceStates.CustomService.Name)) failed to start"
+                                }
+                            }
+                        }
+                        
+                        if ($allStarted) {
+                            Write-Output "###SUCCESS###:$env:COMPUTERNAME"
+                        }
+                        else {
+                            throw "One or more services failed to start properly"
+                        }
+                    } -ArgumentList $statusFilePath
+                    
+                    Remove-PSSession -Session $session
+                }
+                catch {
+                    Write-Output "###ERROR###:${server}:$($_.Exception.Message)"
+                }
+            } -ArgumentList $server, $cred, $statusFilePath
+        }
+
+        # If no jobs were created (no state files found), exit early
+        if (-not $jobs -or $jobs.Count -eq 0) {
+            Write-LogMessage "No service state files found for servers in this list. Please stop services first." -IsError
+            $startServicesButton.Enabled = $true
+            $progressBar.Visible = $false
+            return
+        }
+
+        Write-LogMessage "Starting services on servers..." -ProgressValue 20
+    
+        $totalJobs = $jobs.Count
+        $lastProgress = 20
+        $processedJobs = @()
+
+        # Monitor jobs until all are complete
+        while ($jobs | Where-Object { $_.State -eq 'Running' -or ($_.State -eq 'Completed' -and $_ -notin $processedJobs) }) {
+            $completed = ($jobs | Where-Object { $_.State -eq 'Completed' }).Count
+            $progress = 20 + [math]::Floor(($completed / $totalJobs) * 80)
+
+            if ($progress -ne $lastProgress) {
+                Write-LogMessage "Starting services on servers... ($completed/$totalJobs complete)" -ProgressValue $progress
+                $lastProgress = $progress
+            }
+
+            # Process completed jobs
+            foreach ($job in ($jobs | Where-Object { $_.State -eq 'Completed' -and $_ -notin $processedJobs })) {
+                $output = Receive-Job -Job $job
+                foreach ($line in $output) {
+                    if ($line.StartsWith('###SUCCESS###:')) {
+                        $server = $line.Split(':')[1]
+                        Write-LogMessage "Service start completed: $server"
+                    }
+                    elseif ($line.StartsWith('###ERROR###:')) {
+                        $parts = $line.Split(':')
+                        Write-LogMessage "Service start failed: $($parts[1]) - $($parts[2])" -IsError
+                    }
+                    elseif ($line.StartsWith('###STATUS###:')) {
+                        $status = $line.Split(':')[1]
+                        Write-LogMessage $status
+                    }
+                }
+                $processedJobs += $job
+                Remove-Job -Job $job
+            }
+            [System.Windows.Forms.Application]::DoEvents()
+            Start-Sleep -Milliseconds 100
+        }
+
+        # Final check for any remaining jobs
+        foreach ($job in ($jobs | Where-Object { $_.State -eq 'Completed' -and $_ -notin $processedJobs })) {
+            Receive-Job -Job $job | Out-Null
+            Remove-Job -Job $job
+        }
+
+        Write-LogMessage "Service start completed on all servers." -ProgressValue 100
+    }
+    catch {
+        Write-LogMessage "Error during service start: $($_.Exception.Message)" -IsError
+        $progressBar.Visible = $false 
+    }
+    finally {
+        # Cleanup any remaining jobs
+        $jobs | Where-Object { $_ } | Remove-Job -Force -ErrorAction SilentlyContinue
+        Get-PSSession | Remove-PSSession -ErrorAction SilentlyContinue
+        $startServicesButton.Enabled = $true
+        $progressBar.Value = 0
+        $progressLabel.Text = "0%"
+    }
+})
+
+# Add the Rollback button click event
+$rollbackButton.Add_Click({
+    # Disable the button during rollback
+    $rollbackButton.Enabled = $false
+    
+    if (-not $global:currentZipFileName) {
+        Write-LogMessage "Please push a ZIP file first." -IsError
+        $rollbackButton.Enabled = $true
+        return
+    }
+
+    $selectedItem = $dropdown.SelectedItem
+    if ($selectedItem -eq "Select Server List" -or -not $selectedItem) {
+        Write-LogMessage "Please select a server list." -IsError
+        $rollbackButton.Enabled = $true
+        return
+    }
+
+    # Add confirmation dialog
+    $result = [System.Windows.Forms.MessageBox]::Show(
+        "Are you sure you want to rollback on the selected servers?`n`nServer List: $selectedItem`nPackage: $global:currentZipFileName",
+        "Confirm Rollback",
+        [System.Windows.Forms.MessageBoxButtons]::YesNo,
+        [System.Windows.Forms.MessageBoxIcon]::Warning,
+        [System.Windows.Forms.MessageBoxDefaultButton]::Button2
+    )
+
+    if ($result -eq [System.Windows.Forms.DialogResult]::No) {
+        Write-LogMessage "Rollback cancelled by user."
+        $rollbackButton.Enabled = $true
+        return
+    }
+    
+    $cred = Get-GlobalCredential
+
+    try {
+        # Clear previous progress
+        $progressBar.Value = 0
+        $progressLabel.Text = "0%"
+        $progressBar.Visible = $true
+        $progressLabel.Visible = $true
+        
+        Write-LogMessage "Starting rollback process..." -ProgressValue 0
+
+        $serverListFile = ".\config\$selectedItem.txt"
+        $servers = Get-Content $serverListFile | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+
+        Write-LogMessage "Preparing for parallel rollback..." -ProgressValue 10
+
+        # Create all rollback jobs simultaneously
+        $jobs = foreach ($server in $servers) {
+            Start-Job -ScriptBlock {
+                param ($server, [PSCredential]$cred, $zipFileName, $AppPoolName1, $AppPoolName2, $AppPoolName3, $ServiceName)
+                try {
+                    Write-Output "###STATUS###:Starting rollback on $server"
+                    $session = New-PSSession -ComputerName $server -Credential $cred
+                    
+                    Invoke-Command -Session $session -ScriptBlock {
+                        param ($zipFileName, $AppPoolName1, $AppPoolName2, $AppPoolName3, $ServiceName)
+                        
+                        $zipPath = "C:\temp\$zipFileName"
+                        $extractPath = "C:\temp\extracted"
+                        
+                        Add-Type -AssemblyName System.IO.Compression.FileSystem
+                        
+                        # Check if the extracted files exist
+                        if (-not (Test-Path $extractPath)) {
+                            throw "Extracted files not found. Cannot perform rollback."
+                        }
+                        
+                        $exeFile = Get-ChildItem -Path $extractPath -Filter "*.exe" -Recurse | Select-Object -First 1
+                        if ($exeFile) {
+                            # Change to the executable's directory before running it
+                            $originalLocation = Get-Location
+                            try {
+                                Set-Location -Path $exeFile.DirectoryName
+                                # Use 'uninstall' argument instead of 'install'
+                                $process = Start-Process -FilePath $exeFile.FullName -ArgumentList "uninstall" -Wait -NoNewWindow -PassThru
+                        
+                                if ($process.ExitCode -eq 0) {
+                                    Write-Output "###SUCCESS###:$env:COMPUTERNAME"
+                                }
+                                else {
+                                    throw "Rollback failed with exit code: $($process.ExitCode)"
+                                }
+                            }
+                            finally {
+                                Set-Location -Path $originalLocation
+                            }
+                        }
+                        else {
+                            throw "No EXE file found in extracted contents for rollback"
+                        }
+                    } -ArgumentList $zipFileName, $AppPoolName1, $AppPoolName2, $AppPoolName3, $ServiceName
+                    
+                    Remove-PSSession -Session $session
+                }
+                catch {
+                    Write-Output "###ERROR###:${server}:$($_.Exception.Message)"
+                }
+            } -ArgumentList $server, $cred, $global:currentZipFileName, $AppPoolName, $AppPoolName2, $AppPoolName3, $ServiceName
+        }
+
+        Write-LogMessage "Starting parallel rollback on servers..." -ProgressValue 20
+        
+        $totalJobs = $jobs.Count
+        $lastProgress = 20
+        $processedJobs = @()
+
+        # Monitor jobs until all are complete
+        while ($jobs | Where-Object { $_.State -eq 'Running' -or ($_.State -eq 'Completed' -and $_ -notin $processedJobs) }) {
+            $completed = ($jobs | Where-Object { $_.State -eq 'Completed' }).Count
+            $progress = 20 + [math]::Floor(($completed / $totalJobs) * 80)
+
+            if ($progress -ne $lastProgress) {
+                Write-LogMessage "Rolling back on servers... ($completed/$totalJobs complete)" -ProgressValue $progress
+                $lastProgress = $progress
+            }
+
+            # Process completed jobs
+            foreach ($job in ($jobs | Where-Object { $_.State -eq 'Completed' -and $_ -notin $processedJobs })) {
+                $output = Receive-Job -Job $job
+                foreach ($line in $output) {
+                    if ($line.StartsWith('###SUCCESS###:')) {
+                        $server = $line.Split(':')[1]
+                        Write-LogMessage "Rollback completed: $server"
+                    }
+                    elseif ($line.StartsWith('###ERROR###:')) {
+                        $parts = $line.Split(':')
+                        Write-LogMessage "Rollback failed: $($parts[1]) - $($parts[2])" -IsError
+                    }
+                    elseif ($line.StartsWith('###STATUS###:')) {
+                        $status = $line.Split(':')[1]
+                        Write-LogMessage $status
+                    }
+                }
+                $processedJobs += $job
+                Remove-Job -Job $job
+            }
+            [System.Windows.Forms.Application]::DoEvents()
+            Start-Sleep -Milliseconds 100
+        }
+
+        # Final check for any remaining jobs
+        foreach ($job in ($jobs | Where-Object { $_.State -eq 'Completed' -and $_ -notin $processedJobs })) {
+            Receive-Job -Job $job | Out-Null
+            Remove-Job -Job $job
+        }
+        
+        Write-LogMessage "Rollback completed on all servers." -ProgressValue 100
+    }
+    catch {
+        Write-LogMessage "Error during rollback: $($_.Exception.Message)" -IsError
+        $progressBar.Visible = $false 
+    }
+    finally {
+        # Cleanup any remaining jobs
+        $jobs | Where-Object { $_ } | Remove-Job -Force -ErrorAction SilentlyContinue
+        Get-PSSession | Remove-PSSession -ErrorAction SilentlyContinue
+        $rollbackButton.Enabled = $true
+        $progressBar.Value = 0
+        $progressLabel.Text = "0%"
+    }
+})
+
+# Add the Check Version button click event
+$checkVersionButton.Add_Click({
+    # Disable the button during operation
+    $checkVersionButton.Enabled = $false
+    
+    $selectedItem = $dropdown.SelectedItem
+    if ($selectedItem -eq "Select Server List" -or -not $selectedItem) {
+        Write-LogMessage "Please select a server list." -IsError
+        $checkVersionButton.Enabled = $true
+        return
+    }
+
+    $cred = Get-GlobalCredential
+
+    try {
+        # Clear previous progress
+        $progressBar.Value = 0
+        $progressLabel.Text = "0%"
+        $progressBar.Visible = $true
+        $progressLabel.Visible = $true
+    
+        Write-LogMessage "Starting version check process..." -ProgressValue 0
+
+        $serverListFile = ".\config\$selectedItem.txt"
+        $servers = Get-Content $serverListFile | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+
+        Write-LogMessage "Preparing to check versions on servers..." -ProgressValue 10
+
+        # Create all version check jobs simultaneously
+        $jobs = foreach ($server in $servers) {
+            Start-Job -ScriptBlock {
+                param ($server, [PSCredential]$cred, $AppPoolName, $ServiceName)
+                try {
+                    Write-Output "###STATUS###:Checking version information on $server"
+                    $session = New-PSSession -ComputerName $server -Credential $cred
+                
+                    Invoke-Command -Session $session -ScriptBlock {
+                        param ($AppPoolName, $ServiceName)
+                        
+                        $versionInfo = @{
+                            ComputerName = $env:COMPUTERNAME
+                            OSVersion = [System.Environment]::OSVersion.Version.ToString()
+                            ServiceInfo = $null
+                            AppPoolInfo = $null
+                            InstalledApps = @()
+                        }
+                        
+                        # Check service version if possible
+                        $service = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+                        if ($service) {
+                            $versionInfo.ServiceInfo = @{
+                                Name = $service.Name
+                                DisplayName = $service.DisplayName
+                                Status = $service.Status.ToString()
+                            }
+                            
+                            # Try to get executable path and version
+                            try {
+                                $wmiService = Get-WmiObject -Class Win32_Service -Filter "Name='$ServiceName'"
+                                if ($wmiService) {
+                                    $pathName = $wmiService.PathName
+                                    $exePath = $pathName -replace '^"([^"]+)".*$', '$1'
+                                    if (Test-Path $exePath) {
+                                        $fileVersion = (Get-Item $exePath).VersionInfo.FileVersion
+                                        $versionInfo.ServiceInfo.Path = $exePath
+                                        $versionInfo.ServiceInfo.Version = $fileVersion
+                                    }
+                                }
+                            }
+                            catch {
+                                # Unable to get service executable info
+                            }
+                        }
+                        
+                        # Check app pool info
+                        if (Get-Command Get-WebAppPoolState -ErrorAction SilentlyContinue) {
+                            try {
+                                Import-Module WebAdministration
+                                $appPool = Get-Item "IIS:\AppPools\$AppPoolName" -ErrorAction SilentlyContinue
+                                if ($appPool) {
+                                    $versionInfo.AppPoolInfo = @{
+                                        Name = $appPool.Name
+                                        State = $appPool.State.ToString()
+                                        RuntimeVersion = $appPool.ManagedRuntimeVersion
+                                    }
+                                    
+                                    # Try to get application information
+                                    $sites = Get-ChildItem "IIS:\Sites" -ErrorAction SilentlyContinue
+                                    $appInfo = @()
+                                    foreach ($site in $sites) {
+                                        $apps = Get-WebApplication -Site $site.Name -ErrorAction SilentlyContinue
+                                        foreach ($app in $apps) {
+                                            if ($app.ApplicationPool -eq $AppPoolName) {
+                                                $appInfo += @{
+                                                    SiteName = $site.Name
+                                                    AppName = $app.Path
+                                                    PhysicalPath = $app.PhysicalPath
+                                                }
+                                                
+                                                # Try to get version from dll or config file
+                                                try {
+                                                    $assemblyFiles = Get-ChildItem -Path $app.PhysicalPath -Filter "*.dll" -Recurse -ErrorAction SilentlyContinue | 
+                                                                     Where-Object { $_.Name -like "*$ServiceName*" -or $_.Name -like "*Application*" }
+                                                    
+                                                    if ($assemblyFiles) {
+                                                        foreach ($file in $assemblyFiles) {
+                                                            $appInfo[-1].AssemblyVersion = (Get-Item $file.FullName).VersionInfo.FileVersion
+                                                            break
+                                                        }
+                                                    }
+                                                }
+                                                catch {
+                                                    # Unable to get assembly version
+                                                }
+                                            }
+                                        }
+                                    }
+                                    
+                                    if ($appInfo.Count -gt 0) {
+                                        $versionInfo.AppPoolInfo.Applications = $appInfo
+                                    }
+                                }
+                            }
+                            catch {
+                                # Unable to get app pool info
+                            }
+                        }
+                        
+                        # Get installed applications
+                        try {
+                            $installedApps = Get-WmiObject -Class Win32_Product |
+                                             Where-Object { $_.Name -like "*$ServiceName*" -or $_.Name -like "*Application*" } |
+                                             Select-Object Name, Version, Vendor, InstallDate
+                            
+                            if ($installedApps) {
+                                foreach ($app in $installedApps) {
+                                    $versionInfo.InstalledApps += @{
+                                        Name = $app.Name
+                                        Version = $app.Version
+                                        Vendor = $app.Vendor
+                                        InstallDate = $app.InstallDate
+                                    }
+                                }
+                            }
+                        }
+                        catch {
+                            # Unable to get installed apps
+                        }
+                        
+                        # Return version information
+                        return $versionInfo
+                    } -ArgumentList $AppPoolName, $ServiceName
+                    
+                    # Process the returned version info
+                    $output = "### VERSION INFO FOR $server ###`n"
+                    $output += "OS Version: $($versionInfo.OSVersion)`n"
+                    
+                    if ($versionInfo.ServiceInfo) {
+                        $output += "`nService Information:`n"
+                        $output += "  Name: $($versionInfo.ServiceInfo.Name)`n"
+                        $output += "  Display Name: $($versionInfo.ServiceInfo.DisplayName)`n"
+                        $output += "  Status: $($versionInfo.ServiceInfo.Status)`n"
+                        if ($versionInfo.ServiceInfo.Version) {
+                            $output += "  Version: $($versionInfo.ServiceInfo.Version)`n"
+                        }
+                    }
+                    
+                    if ($versionInfo.AppPoolInfo) {
+                        $output += "`nApp Pool Information:`n"
+                        $output += "  Name: $($versionInfo.AppPoolInfo.Name)`n"
+                        $output += "  State: $($versionInfo.AppPoolInfo.State)`n"
+                        $output += "  Runtime Version: $($versionInfo.AppPoolInfo.RuntimeVersion)`n"
+                        
+                        if ($versionInfo.AppPoolInfo.Applications) {
+                            $output += "  Applications:`n"
+                            foreach ($app in $versionInfo.AppPoolInfo.Applications) {
+                                $output += "    - Site: $($app.SiteName), App: $($app.AppName)`n"
+                                $output += "      Physical Path: $($app.PhysicalPath)`n"
+                                if ($app.AssemblyVersion) {
+                                    $output += "      Assembly Version: $($app.AssemblyVersion)`n"
+                                }
+                            }
+                        }
+                    }
+                    
+                    if ($versionInfo.InstalledApps.Count -gt 0) {
+                        $output += "`nInstalled Applications:`n"
+                        foreach ($app in $versionInfo.InstalledApps) {
+                            $output += "  - $($app.Name) (Version: $($app.Version))`n"
+                            $output += "    Vendor: $($app.Vendor), Installed: $($app.InstallDate)`n"
+                        }
+                    }
+                    
+                    Write-Output "###VERSIONINFO###:$output"
+                    Write-Output "###SUCCESS###:$server"
+                    
+                    Remove-PSSession -Session $session
+                }
+                catch {
+                    Write-Output "###ERROR###:${server}:$($_.Exception.Message)"
+                }
+            } -ArgumentList $server, $cred, $AppPoolName, $ServiceName
+        }
+
+        Write-LogMessage "Checking versions on servers..." -ProgressValue 20
+    
+        $totalJobs = $jobs.Count
+        $lastProgress = 20
+        $processedJobs = @()
+
+        # Monitor jobs until all are complete
+        while ($jobs | Where-Object { $_.State -eq 'Running' -or ($_.State -eq 'Completed' -and $_ -notin $processedJobs) }) {
+            $completed = ($jobs | Where-Object { $_.State -eq 'Completed' }).Count
+            $progress = 20 + [math]::Floor(($completed / $totalJobs) * 80)
+
+            if ($progress -ne $lastProgress) {
+                Write-LogMessage "Checking versions on servers... ($completed/$totalJobs complete)" -ProgressValue $progress
+                $lastProgress = $progress
+            }
+
+            # Process completed jobs
+            foreach ($job in ($jobs | Where-Object { $_.State -eq 'Completed' -and $_ -notin $processedJobs })) {
+                $output = Receive-Job -Job $job
+                foreach ($line in $output) {
+                    if ($line.StartsWith('###SUCCESS###:')) {
+                        $server = $line.Split(':')[1]
+                        Write-LogMessage "Version check completed: $server"
+                    }
+                    elseif ($line.StartsWith('###ERROR###:')) {
+                        $parts = $line.Split(':')
+                        Write-LogMessage "Version check failed: $($parts[1]) - $($parts[2])" -IsError
+                    }
+                    elseif ($line.StartsWith('###STATUS###:')) {
+                        $status = $line.Split(':')[1]
+                        Write-LogMessage $status
+                    }
+                    elseif ($line.StartsWith('###VERSIONINFO###:')) {
+                        $versionInfoText = $line.Substring(17)  # Remove prefix
+                        Write-LogMessage "`n$versionInfoText"
+                    }
+                }
+                $processedJobs += $job
+                Remove-Job -Job $job
+            }
+            [System.Windows.Forms.Application]::DoEvents()
+            Start-Sleep -Milliseconds 100
+        }
+
+        # Final check for any remaining jobs
+        foreach ($job in ($jobs | Where-Object { $_.State -eq 'Completed' -and $_ -notin $processedJobs })) {
+            Receive-Job -Job $job | Out-Null
+            Remove-Job -Job $job
+        }
+
+        Write-LogMessage "Version check completed on all servers." -ProgressValue 100
+    }
+    catch {
+        Write-LogMessage "Error during version check: $($_.Exception.Message)" -IsError
+        $progressBar.Visible = $false 
+    }
+    finally {
+        # Cleanup any remaining jobs
+        $jobs | Where-Object { $_ } | Remove-Job -Force -ErrorAction SilentlyContinue
+        Get-PSSession | Remove-PSSession -ErrorAction SilentlyContinue
+        $checkVersionButton.Enabled = $true
+        $progressBar.Value = 0
+        $progressLabel.Text = "0%"
+    }
+})
 
 # Center buttons initially
 Set-ButtonsAlignment
