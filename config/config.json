@@ -3,5 +3,6 @@
     "InstallerName": "setup.exe",
     "AppPoolName": "YourAppPool",
     "ServiceName": "YourService",
-    "DefaultBrowsePath": "C:\\temp"
+    "DefaultBrowsePath": "C:\\temp",
+    "WebsiteName": "YourWebsite"
 }

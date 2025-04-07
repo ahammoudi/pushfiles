@@ -68,10 +68,11 @@ try {
     $config = Get-Content -Path "$PSScriptRoot\config\config.json" | ConvertFrom-Json
     
     $LogFile = $config.LogFile
-    $AppPoolName = $config.AppPoolName
+    $AppPoolName1 = $config.AppPoolName1
     $AppPoolName2 = $config.AppPoolName2       # Add second app pool
     $AppPoolName3 = $config.AppPoolName3       # Add third app pool
     $ServiceName = $config.ServiceName
+    $WebsiteName = $config.WebsiteName         # Add website name from config
 
     if (-not (Test-Path $LogFile)) {
         New-Item -ItemType File -Path $LogFile -Force
@@ -992,13 +993,13 @@ $installMsiButton.Add_Click({
             # Create all installation jobs simultaneously
             $jobs = foreach ($server in $servers) {
                 Start-Job -ScriptBlock {
-                    param ($server, [PSCredential]$cred, $zipFileName, $AppPoolName1, $ServiceName)
+                    param ($server, [PSCredential]$cred, $zipFileName)
                     try {
                         Write-Output "###STATUS###:Starting installation on $server"
                         $session = New-PSSession -ComputerName $server -Credential $cred
                     
                         Invoke-Command -Session $session -ScriptBlock {
-                            param ($zipFileName, $AppPoolName1, $ServiceName)
+                            param ($zipFileName)
                             
                             $zipPath = "C:\temp\$zipFileName"
                             $extractPath = "C:\temp\extracted"
@@ -1028,13 +1029,13 @@ $installMsiButton.Add_Click({
                             else {
                                 throw "No EXE file found in extracted contents"
                             }
-                        } -ArgumentList $ZipFileName, $AppPoolName, $AppPoolName2, $AppPoolName3, $ServiceName
+                        } -ArgumentList $ZipFileName, $WebsiteName, $AppPoolName1, $AppPoolName2, $AppPoolName3, $ServiceName
                         Remove-PSSession -Session $session
                     }
                     catch {
                         Write-Output "###ERROR###:${server}:$($_.Exception.Message)"
                     }
-                } -ArgumentList $server, $cred, $global:currentZipFileName, $AppPoolName, $AppPoolName2, $AppPoolName3, $ServiceName
+                } -ArgumentList $server, $cred, $global:currentZipFileName, $WebsiteName, $AppPoolName1, $AppPoolName2, $AppPoolName3, $ServiceName
             }
 
             Write-LogMessage "Starting parallel installation on servers..." -ProgressValue 20
@@ -1154,88 +1155,157 @@ $stopServicesButton.Add_Click({
         # Create all stop jobs simultaneously
         $jobs = foreach ($server in $servers) {
             Start-Job -ScriptBlock {
-                param ($server, [PSCredential]$cred, $AppPoolName, $AppPoolName2, $AppPoolName3, $ServiceName, $selectedItem, $statusFilePath)
+                param ($server, [PSCredential]$cred, $WebsiteName, $AppPoolName1, $AppPoolName2, $AppPoolName3, $ServiceName, $selectedItem, $statusFilePath)
                 try {
                     Write-Output "###STATUS###:Checking service status on $server"
                     $session = New-PSSession -ComputerName $server -Credential $cred
                 
                     Invoke-Command -Session $session -ScriptBlock {
-                        param ($AppPoolName, $AppPoolName2, $AppPoolName3, $ServiceName, $statusFilePath)
+                        param ($WebsiteName, $AppPoolName1, $AppPoolName2, $AppPoolName3, $ServiceName, $statusFilePath)
                         
-                        # Check states and store service objects
+                        # Import required module
+                        Import-Module WebAdministration
+                        
+                        # Initialize service states object
                         $serviceStates = @{
-                            IIS = @{
-                                Name = "W3SVC"
-                                IsRunning = $false
-                            }
+                            Websites = @(
+                                @{
+                                    Name = $WebsiteName    # Use config value instead of hardcoding "site1"
+                                    IsRunning = $false
+                                    State = $null
+                                    Path = $null
+                                }
+                            )
                             AppPools = @(
                                 @{
-                                    Name = $AppPoolName
+                                    Name = $AppPoolName1
                                     IsRunning = $false
+                                    State = $null
+                                    RuntimeVersion = $null
                                 },
                                 @{
                                     Name = $AppPoolName2
                                     IsRunning = $false
+                                    State = $null
+                                    RuntimeVersion = $null
                                 },
                                 @{
                                     Name = $AppPoolName3
                                     IsRunning = $false
+                                    State = $null
+                                    RuntimeVersion = $null
                                 }
                             )
                             CustomService = @{
                                 Name = $ServiceName
                                 IsRunning = $false
+                                Status = $null
+                                StartMode = $null
+                                PathName = $null
                             }
                         }
                         
-                        # Get service states
-                        Import-Module WebAdministration
-                        
-                        # Check IIS status
-                        $iisService = Get-Service -Name 'W3SVC' -ErrorAction SilentlyContinue
-                        if ($iisService -and $iisService.Status -eq 'Running') {
-                            $serviceStates.IIS.IsRunning = $true
-                            Write-Output "###STATUS###:IIS (W3SVC) is running, will be stopped"
-                        }
-
-                        # Check app pools
-                        foreach ($i in 0..2) {
-                            $appPoolName = $serviceStates.AppPools[$i].Name
-                            if ($appPoolName) {
-                                $appPool = Get-Item "IIS:\AppPools\$appPoolName" -ErrorAction SilentlyContinue
-                                if ($appPool -and $appPool.State -eq 'Started') {
-                                    $serviceStates.AppPools[$i].IsRunning = $true
-                                    Write-Output "###STATUS###:Application Pool ($appPoolName) is running, will be stopped"
+                        # Check and capture website status
+                        Write-Output "###STATUS###:Capturing website status"
+                        foreach ($i in 0..($serviceStates.Websites.Count - 1)) {
+                            $siteName = $serviceStates.Websites[$i].Name
+                            if ($siteName) {
+                                $website = Get-Website -Name $siteName -ErrorAction SilentlyContinue
+                                if ($website) {
+                                    $serviceStates.Websites[$i].State = $website.State
+                                    $serviceStates.Websites[$i].Path = $website.PhysicalPath
+                                    if ($website.State -eq 'Started') {
+                                        $serviceStates.Websites[$i].IsRunning = $true
+                                        Write-Output "###STATUS###:Website $siteName is running with state: $($website.State)"
+                                    }
+                                    else {
+                                        Write-Output "###STATUS###:Website $siteName is not running State: $($website.State)"
+                                    }
+                                }
+                                else {
+                                    Write-Output "###STATUS###:Website $siteName not found"
                                 }
                             }
                         }
 
-                        # Check custom service
-                        $customService = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
-                        if ($customService -and $customService.Status -eq 'Running') {
-                            $serviceStates.CustomService.IsRunning = $true
-                            Write-Output "###STATUS###:Custom Service ($ServiceName) is running, will be stopped"
+                        # Check and capture app pool status
+                        Write-Output "###STATUS###:Capturing application pool status"
+                        foreach ($i in 0..2) {
+                            $appPoolName = $serviceStates.AppPools[$i].Name
+                            if ($appPoolName) {
+                                $appPool = Get-Item "IIS:\AppPools\$appPoolName" -ErrorAction SilentlyContinue
+                                if ($appPool) {
+                                    $serviceStates.AppPools[$i].State = $appPool.State
+                                    $serviceStates.AppPools[$i].RuntimeVersion = $appPool.ManagedRuntimeVersion
+                                    if ($appPool.State -eq 'Started') {
+                                        $serviceStates.AppPools[$i].IsRunning = $true
+                                        Write-Output "###STATUS###:Application Pool ($appPoolName) is running with state: $($appPool.State)"
+                                    }
+                                    else {
+                                        Write-Output "###STATUS###:Application Pool ($appPoolName) is not running (State: $($appPool.State))"
+                                    }
+                                }
+                                else {
+                                    Write-Output "###STATUS###:Application Pool ($appPoolName) not found"
+                                }
+                            }
                         }
 
-                        # Stop services in reverse order
+                        # Check and capture custom service status
+                        Write-Output "###STATUS###:Capturing $ServiceName status"
+                        $customService = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+                        if ($customService) {
+                            $serviceStates.CustomService.Status = $customService.Status.ToString()
+                            # Get additional service details if possible
+                            try {
+                                $wmiService = Get-WmiObject -Class Win32_Service -Filter "Name='$ServiceName'" -ErrorAction SilentlyContinue
+                                if ($wmiService) {
+                                    $serviceStates.CustomService.StartMode = $wmiService.StartMode
+                                    $serviceStates.CustomService.PathName = $wmiService.PathName
+                                }
+                            }
+                            catch {
+                                Write-Output "###STATUS###:Could not get detailed service info: $_"
+                            }
+                            
+                            if ($customService.Status -eq 'Running') {
+                                $serviceStates.CustomService.IsRunning = $true
+                                Write-Output "###STATUS###: $ServiceName is running with status: $($customService.Status)"
+                            }
+                            else {
+                                Write-Output "###STATUS###: $ServiceName is not running (Status: $($customService.Status))"
+                            }
+                        }
+                        else {
+                            Write-Output "###STATUS###: $ServiceName not found"
+                        }
+
+                        # Save current state before stopping anything
+                        Write-Output "###STATUS###:Saving initial service state"
+                        $serviceStates | Export-Clixml -Path "C:\temp\service_state.xml" -Force
+                        Write-Output "###STATEFILE###:C:\temp\service_state.xml"
+
+                        # Stop services in this specific order:
                         # 1. Stop custom service first
                         if ($serviceStates.CustomService.IsRunning) {
-                            Write-Output "###STATUS###:Stopping Custom Service ($ServiceName)..."
+                            Write-Output "###STATUS###:Stopping $ServiceName ..."
                             Stop-Service -Name $ServiceName -Force
                         }
 
-                        # 2. Stop app pools
+                        # 2. Stop websites before app pools
+                        foreach ($website in $serviceStates.Websites) {
+                            if ($website.IsRunning) {
+                                Write-Output "###STATUS###:Stopping Website ($($website.Name))..."
+                                Stop-Website -Name $website.Name
+                            }
+                        }
+
+                        # 3. Stop app pools last
                         foreach ($appPool in $serviceStates.AppPools) {
                             if ($appPool.IsRunning) {
                                 Write-Output "###STATUS###:Stopping Application Pool ($($appPool.Name))..."
                                 Stop-WebAppPool -Name $appPool.Name
                             }
-                        }
-
-                        # 3. Stop IIS last
-                        if ($serviceStates.IIS.IsRunning) {
-                            Write-Output "###STATUS###:Stopping IIS (W3SVC)..."
-                            Stop-Service -Name 'W3SVC' -Force
                         }
 
                         # Verify all stopped correctly
@@ -1250,6 +1320,17 @@ $stopServicesButton.Add_Click({
                             }
                         }
                         
+                        # Verify websites
+                        foreach ($website in $serviceStates.Websites) {
+                            if ($website.IsRunning) {
+                                $siteObject = Get-Website -Name $website.Name -ErrorAction SilentlyContinue
+                                if ($siteObject -and $siteObject.State -ne 'Stopped') {
+                                    $allStopped = $false
+                                    Write-Output "###ERROR###:$env:COMPUTERNAME:Website ($($website.Name)) failed to stop"
+                                }
+                            }
+                        }
+                        
                         # Verify app pools
                         foreach ($appPool in $serviceStates.AppPools) {
                             if ($appPool.IsRunning) {
@@ -1260,27 +1341,15 @@ $stopServicesButton.Add_Click({
                                 }
                             }
                         }
-                        
-                        # Verify IIS
-                        if ($serviceStates.IIS.IsRunning) {
-                            $iisService = Get-Service -Name 'W3SVC' -ErrorAction SilentlyContinue
-                            if ($iisService -and $iisService.Status -ne 'Stopped') {
-                                $allStopped = $false
-                                Write-Output "###ERROR###:$env:COMPUTERNAME:IIS (W3SVC) failed to stop"
-                            }
-                        }
 
-                        # Return status and save to file
+                        # Return status
                         if ($allStopped) {
-                            # Convert to XML and save
-                            $serviceStates | Export-Clixml -Path "C:\temp\service_state.xml" -Force
-                            Write-Output "###STATEFILE###:C:\temp\service_state.xml"
                             Write-Output "###SUCCESS###:$env:COMPUTERNAME"
                         }
                         else {
                             throw "One or more services failed to stop properly"
                         }
-                    } -ArgumentList $AppPoolName, $AppPoolName2, $AppPoolName3, $ServiceName, $statusFilePath
+                    } -ArgumentList $WebsiteName, $AppPoolName1, $AppPoolName2, $AppPoolName3, $ServiceName, $statusFilePath
                     
                     # Copy the state file from the remote server to local
                     $remoteStateFile = Invoke-Command -Session $session -ScriptBlock {
@@ -1297,7 +1366,7 @@ $stopServicesButton.Add_Click({
                 catch {
                     Write-Output "###ERROR###:${server}:$($_.Exception.Message)"
                 }
-            } -ArgumentList $server, $cred, $AppPoolName, $AppPoolName2, $AppPoolName3, $ServiceName, $selectedItem, (Get-ServiceStatusFilePath -ServerList $selectedItem -Server $server)
+            } -ArgumentList $server, $cred, $WebsiteName, $AppPoolName1, $AppPoolName2, $AppPoolName3, $ServiceName, $selectedItem, (Get-ServiceStatusFilePath -ServerList $selectedItem -Server $server)
         }
 
         Write-LogMessage "Starting parallel service stop on servers..." -ProgressValue 20
@@ -1649,13 +1718,13 @@ $rollbackButton.Add_Click({
         # Create all rollback jobs simultaneously
         $jobs = foreach ($server in $servers) {
             Start-Job -ScriptBlock {
-                param ($server, [PSCredential]$cred, $zipFileName, $AppPoolName1, $AppPoolName2, $AppPoolName3, $ServiceName)
+                param ($server, [PSCredential]$cred, $zipFileName)
                 try {
                     Write-Output "###STATUS###:Starting rollback on $server"
                     $session = New-PSSession -ComputerName $server -Credential $cred
                     
                     Invoke-Command -Session $session -ScriptBlock {
-                        param ($zipFileName, $AppPoolName1, $AppPoolName2, $AppPoolName3, $ServiceName)
+                        param ($zipFileName)
                         
                         $zipPath = "C:\temp\$zipFileName"
                         $extractPath = "C:\temp\extracted"
@@ -1690,7 +1759,7 @@ $rollbackButton.Add_Click({
                         else {
                             throw "No EXE file found in extracted contents for rollback"
                         }
-                    } -ArgumentList $zipFileName, $AppPoolName1, $AppPoolName2, $AppPoolName3, $ServiceName
+                    } -ArgumentList $zipFileName, $WebsiteName, $AppPoolName1, $AppPoolName2, $AppPoolName3, $ServiceName
                     
                     Remove-PSSession -Session $session
                 }
