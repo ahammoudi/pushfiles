@@ -1201,6 +1201,7 @@ $stopServicesButton.Add_Click({
                                 IsRunning = $false
                                 Status = $null
                                 StartMode = $null
+                                OriginalStartMode = $null  # Add this field
                                 PathName = $null
                             }
                         }
@@ -1288,6 +1289,13 @@ $stopServicesButton.Add_Click({
                         # Stop services in this specific order:
                         # 1. Stop custom service first
                         if ($serviceStates.CustomService.IsRunning) {
+                            Write-Output "###STATUS###:Setting $ServiceName to Manual startup type..."
+                            # Store original start mode before changing it
+                            $serviceStates.CustomService.OriginalStartMode = (Get-WmiObject -Class Win32_Service -Filter "Name='$ServiceName'").StartMode
+                            
+                            # Set to manual before stopping
+                            Set-Service -Name $ServiceName -StartupType Manual
+                            
                             Write-Output "###STATUS###:Stopping $ServiceName ..."
                             Stop-Service -Name $ServiceName -Force
                         }
@@ -1532,6 +1540,17 @@ $startServicesButton.Add_Click({
                         if ($serviceStates.CustomService.IsRunning) {
                             Write-Output "###STATUS###:Starting Custom Service ($($serviceStates.CustomService.Name))..."
                             Start-Service -Name $serviceStates.CustomService.Name -ErrorAction SilentlyContinue
+                            
+                            # Restore original startup type
+                            if ($serviceStates.CustomService.OriginalStartMode) {
+                                Write-Output "###STATUS###:Restoring $($serviceStates.CustomService.Name) to $($serviceStates.CustomService.OriginalStartMode) startup type..."
+                                Set-Service -Name $serviceStates.CustomService.Name -StartupType $serviceStates.CustomService.OriginalStartMode
+                            }
+                            else {
+                                # Default to Automatic if original wasn't captured
+                                Write-Output "###STATUS###:Setting $($serviceStates.CustomService.Name) to Automatic startup type..."
+                                Set-Service -Name $serviceStates.CustomService.Name -StartupType Automatic
+                            }
                         }
                         
                         # Wait for services to stabilize
