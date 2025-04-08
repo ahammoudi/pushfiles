@@ -1488,7 +1488,7 @@ $startServicesButton.Add_Click({
             }
             
             Start-Job -ScriptBlock {
-                param ($server, [PSCredential]$cred, $statusFilePath)
+                param ($server, [PSCredential]$cred, $statusFilePath, $WebsiteName, $AppPoolName1, $AppPoolName2, $AppPoolName3, $ServiceName)
                 try {
                     Write-Output "###STATUS###:Starting services on $server based on saved state"
                     
@@ -1499,7 +1499,7 @@ $startServicesButton.Add_Click({
                     Copy-Item -Path $statusFilePath -Destination "C:\temp\service_state.xml" -ToSession $session -Force
                     
                     Invoke-Command -Session $session -ScriptBlock {
-                        param ($statusFilePath)
+                        param ($WebsiteName, $AppPoolName1, $AppPoolName2, $AppPoolName3, $ServiceName)
                         
                         # If the state file doesn't exist, report error
                         if (-not (Test-Path "C:\temp\service_state.xml")) {
@@ -1512,17 +1512,19 @@ $startServicesButton.Add_Click({
                         Import-Module WebAdministration
                         
                         # Start services in correct order:
-                        # 1. Start IIS first
-                        if ($serviceStates.IIS.IsRunning) {
-                            Write-Output "###STATUS###:Starting IIS (W3SVC)..."
-                            Start-Service -Name 'W3SVC' -ErrorAction SilentlyContinue
-                        }
-                        
-                        # 2. Start app pools
+                        # 1. Start app pools first
                         foreach ($appPool in $serviceStates.AppPools) {
                             if ($appPool.IsRunning) {
                                 Write-Output "###STATUS###:Starting Application Pool ($($appPool.Name))..."
                                 Start-WebAppPool -Name $appPool.Name -ErrorAction SilentlyContinue
+                            }
+                        }
+                        
+                        # 2. Start websites next
+                        foreach ($website in $serviceStates.Websites) {
+                            if ($website.IsRunning) {
+                                Write-Output "###STATUS###:Starting Website ($($website.Name))..."
+                                Start-Website -Name $website.Name -ErrorAction SilentlyContinue
                             }
                         }
                         
@@ -1539,15 +1541,17 @@ $startServicesButton.Add_Click({
                         # Verify services are running as expected
                         $allStarted = $true
                         
-                        # Check IIS
-                        if ($serviceStates.IIS.IsRunning) {
-                            $iisService = Get-Service -Name 'W3SVC' -ErrorAction SilentlyContinue
-                            if ($iisService) {
-                                $status = $iisService.Status.ToString()
-                                Write-Output "###STATUS###:IIS (W3SVC) Status: $status"
-                                if ($status -ne 'Running') {
-                                    $allStarted = $false
-                                    Write-Output "###ERROR###:$env:COMPUTERNAME:IIS (W3SVC) failed to start"
+                        # Check websites
+                        foreach ($website in $serviceStates.Websites) {
+                            if ($website.IsRunning) {
+                                $siteObject = Get-Website -Name $website.Name -ErrorAction SilentlyContinue
+                                if ($siteObject) {
+                                    $status = $siteObject.State.ToString()
+                                    Write-Output "###STATUS###:Website ($($website.Name)) Status: $status"
+                                    if ($status -ne 'Started') {
+                                        $allStarted = $false
+                                        Write-Output "###ERROR###:$env:COMPUTERNAME:Website ($($website.Name)) failed to start"
+                                    }
                                 }
                             }
                         }
@@ -1586,14 +1590,14 @@ $startServicesButton.Add_Click({
                         else {
                             throw "One or more services failed to start properly"
                         }
-                    } -ArgumentList $statusFilePath
+                    } -ArgumentList $WebsiteName, $AppPoolName1, $AppPoolName2, $AppPoolName3, $ServiceName
                     
                     Remove-PSSession -Session $session
                 }
                 catch {
                     Write-Output "###ERROR###:${server}:$($_.Exception.Message)"
                 }
-            } -ArgumentList $server, $cred, $statusFilePath
+            } -ArgumentList $server, $cred, $statusFilePath, $WebsiteName, $AppPoolName1, $AppPoolName2, $AppPoolName3, $ServiceName
         }
 
         # If no jobs were created (no state files found), exit early
